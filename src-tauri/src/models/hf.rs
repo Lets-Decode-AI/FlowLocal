@@ -5,7 +5,8 @@ use super::catalog::{CatalogEntry, EngineKind, ModelFile};
 
 const DEFAULT_BASE: &str = "https://huggingface.co";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HfRepoSummary {
     pub repo: String,
     pub downloads: u64,
@@ -13,7 +14,8 @@ pub struct HfRepoSummary {
     pub last_modified: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Inspection {
     Compatible(CatalogEntry),
     Incompatible { reason: String },

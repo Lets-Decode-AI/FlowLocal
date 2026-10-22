@@ -1,22 +1,26 @@
 #![allow(dead_code)]
 
-mod app_state;
+pub mod app_state;
 pub mod audio;
-mod commands;
-mod dictation;
-mod events;
+pub mod commands;
+pub mod dictation;
+pub mod events;
 pub mod hotkey;
 pub mod insert;
 pub mod models;
-mod permissions;
+pub mod permissions;
 mod postprocess;
 pub mod stt;
 pub mod store;
 
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+
+use serde_json::{json, Value};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
 const FLOWBAR_W: f64 = 220.0;
@@ -24,16 +28,20 @@ const FLOWBAR_H: f64 = 56.0;
 const FLOWBAR_BOTTOM_MARGIN: f64 = 48.0;
 
 /// Show the main window, creating it lazily if it does not exist.
-fn open_main_window(app: &AppHandle) -> tauri::Result<()> {
+fn open_main_window(app: &AppHandle, route: Option<&str>) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window("main") {
         w.show()?;
         w.set_focus()?;
         return Ok(());
     }
-    let w = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+    let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("FlowLocal")
-        .inner_size(960.0, 640.0)
-        .build()?;
+        .inner_size(960.0, 640.0);
+    if let Some(route) = route {
+        // Hash route, applied before the page's own scripts run.
+        b = b.initialization_script(format!("if (!location.hash) location.hash = '#{route}';"));
+    }
+    let w = b.build()?;
     // Closing the window destroys it; the app keeps running in the tray.
     let win = w.clone();
     w.on_window_event(move |e| {
@@ -66,17 +74,25 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let pause = MenuItem::with_id(app, "pause", "Pause dictation", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &pause, &quit])?;
+    if let Some(st) = app.try_state::<app_state::AppState>() {
+        *st.pause_item.lock().unwrap_or_else(|p| p.into_inner()) = Some(pause.clone());
+    }
 
     let mut builder = TrayIconBuilder::with_id("tray")
         .tooltip("FlowLocal")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => {
-                if let Err(e) = open_main_window(app) {
+                if let Err(e) = open_main_window(app, None) {
                     eprintln!("failed to open main window: {e}");
                 }
             }
-            "pause" => { /* wired up in a later task */ }
+            "pause" => {
+                if let Some(st) = app.try_state::<app_state::AppState>() {
+                    let paused = !st.paused.load(Ordering::SeqCst);
+                    commands::apply_paused(&st, paused);
+                }
+            }
             "quit" => app.exit(0),
             _ => {}
         });
@@ -87,12 +103,196 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+fn toast(app: &AppHandle, level: &str, message: &str) {
+    let _ = app.emit(events::TOAST, json!({ "level": level, "message": message }));
+}
+
+/// Opens the store, builds every subsystem and registers `AppState`.
+fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use app_state::{AppState, SwitchableRecorder, SETTINGS_KEY};
+    use hotkey::{default_binding, fallback_binding, HotkeyError, HotkeyService};
+
+    let handle = app.handle().clone();
+    let data_dir = app.path().app_data_dir()?;
+    std::fs::create_dir_all(&data_dir)?;
+    let store = store::Store::open(&data_dir.join("flow.db"))?;
+    let settings: app_state::Settings = store.get_setting(SETTINGS_KEY)?.unwrap_or_default();
+    tracing::info!("store opened at {}", data_dir.display());
+
+    // Emit bridge; also caches the latest dictation state for `get_state`.
+    let state_cache = Arc::new(Mutex::new(json!({ "kind": "idle" })));
+    let emit: Arc<dyn Fn(&str, Value) + Send + Sync> = {
+        let h = handle.clone();
+        let cache = state_cache.clone();
+        Arc::new(move |name, value| {
+            if name == events::STATE {
+                *cache.lock().unwrap_or_else(|p| p.into_inner()) = value.clone();
+            }
+            let _ = h.emit(name, value);
+        })
+    };
+
+    // Models.
+    let progress_handle = handle.clone();
+    let models = models::Manager::new(
+        data_dir.join("models"),
+        store.clone(),
+        models::catalog::Catalog::bundled(),
+        models::hf::HfClient::new(commands::stored_hf_token()),
+        Arc::new(move |p| {
+            let _ = progress_handle.emit(events::DL_PROGRESS, &p);
+        }),
+    );
+    models.resume_incomplete_on_startup();
+
+    // Speech worker.
+    let stt = stt::SttWorker::spawn(Box::new(stt::SherpaEngine::new()), settings.idle_unload());
+    if settings.preload {
+        if let Some(m) = models.active() {
+            let stt = stt.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = stt.preload(m).await {
+                    tracing::warn!("model preload failed: {e}");
+                }
+            });
+        }
+    }
+    tracing::info!("speech worker spawned");
+
+    // Audio + hotkeys.
+    let (level_tx, level_rx) = std::sync::mpsc::sync_channel::<f32>(64);
+    let recorder = Arc::new(SwitchableRecorder::new(settings.mic.clone(), level_tx));
+    let (hk_tx, hk_rx) = std::sync::mpsc::channel();
+    let hotkey: Arc<Mutex<Option<HotkeyService>>> = Arc::default();
+    {
+        // Starting the macOS tap can block for up to 300 ms.
+        let slot = hotkey.clone();
+        let h = handle.clone();
+        let binding = settings.hotkey.clone();
+        std::thread::Builder::new().name("flowlocal-hotkey-start".into()).spawn(move || {
+            let mut notice: Option<(&str, String)> = None;
+            let started = match HotkeyService::start(binding.clone(), hk_tx.clone()) {
+                Ok(s) => Some(s),
+                Err(HotkeyError::TapUnavailable) if cfg!(target_os = "macos") && binding == default_binding() => {
+                    match HotkeyService::start(fallback_binding(), hk_tx.clone()) {
+                        Ok(s) => {
+                            notice = Some((
+                                "warning",
+                                "Fn key unavailable \u{2014} using Right \u{2325}. Grant Accessibility to use Fn.".into(),
+                            ));
+                            Some(s)
+                        }
+                        Err(e) => {
+                            notice = Some(("error", format!("Global hotkey unavailable: {e}")));
+                            None
+                        }
+                    }
+                }
+                Err(HotkeyError::Unsupported) => {
+                    notice = Some(("warning", "Global hotkey unavailable on Wayland".into()));
+                    None
+                }
+                Err(e) => {
+                    notice = Some(("error", format!("Global hotkey unavailable: {e}")));
+                    None
+                }
+            };
+            match &started {
+                Some(_) => tracing::info!("hotkey service started"),
+                None => tracing::warn!("hotkey service not started"),
+            }
+            *slot.lock().unwrap_or_else(|p| p.into_inner()) = started;
+            if let Some((level, msg)) = notice {
+                // Give the webviews time to subscribe before the one-shot toast.
+                std::thread::sleep(std::time::Duration::from_millis(2500));
+                toast(&h, level, &msg);
+            }
+        })?;
+    }
+
+    // Controller (needs a tokio runtime context).
+    let store = Arc::new(store);
+    let arm_slot = hotkey.clone();
+    let controller = tauri::async_runtime::block_on(async {
+        dictation::Controller::spawn(dictation::ControllerDeps {
+            hotkeys: hk_rx,
+            levels: Some(level_rx),
+            recorder: recorder.clone(),
+            stt: Arc::new(stt.clone()),
+            models: Arc::new(models.clone()),
+            inserter: Arc::new(insert::ClipboardInserter::system()),
+            store: store.clone(),
+            emit,
+            arm_esc: Arc::new(move |armed| {
+                if let Some(s) = arm_slot.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+                    s.set_armed(armed);
+                }
+            }),
+            app_name: Arc::new(insert::frontmost_app_name),
+        })
+    });
+    tracing::info!("dictation controller started");
+
+    let onboarded = settings.onboarded;
+    let show_flowbar = settings.show_flowbar;
+    app.manage(AppState {
+        store,
+        models,
+        stt,
+        recorder,
+        hotkey,
+        controller,
+        settings: Mutex::new(settings),
+        dictation_state: state_cache,
+        paused: std::sync::atomic::AtomicBool::new(false),
+        pause_item: Mutex::default(),
+    });
+
+    if !show_flowbar {
+        commands::set_flowbar_visible(&handle, false);
+    }
+    if !onboarded {
+        open_main_window(&handle, Some("/onboarding"))?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "flowlocal_lib=info".into())).try_init();
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .invoke_handler(tauri::generate_handler![
+            commands::get_state,
+            commands::set_paused,
+            commands::permissions_status,
+            commands::open_permission_settings,
+            commands::request_microphone,
+            commands::catalog,
+            commands::installed,
+            commands::recommend,
+            commands::hf_search,
+            commands::hf_inspect,
+            commands::model_install,
+            commands::model_pause,
+            commands::model_resume,
+            commands::model_cancel,
+            commands::model_delete,
+            commands::model_set_active,
+            commands::history_list,
+            commands::history_delete,
+            commands::settings_get,
+            commands::settings_set,
+            commands::hf_token_set,
+            commands::dictionary_list,
+            commands::dictionary_add,
+            commands::dictionary_delete,
+            commands::mic_list,
+        ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            init_backend(app)?;
             build_tray(app.handle())?;
             position_flowbar(app.handle())?;
             Ok(())

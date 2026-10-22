@@ -1,6 +1,7 @@
 use sysinfo::System;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Hardware {
     pub total_ram_gb: f64,
     pub cores: usize,

@@ -21,6 +21,7 @@ pub enum DlStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Progress {
     pub model_id: String,
     pub bytes_done: u64,
