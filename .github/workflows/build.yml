@@ -1,8 +1,0 @@
-# Placeholder; CI build matrix is added in a later task.
-name: build
-on: workflow_dispatch
-jobs:
-  noop:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "placeholder"

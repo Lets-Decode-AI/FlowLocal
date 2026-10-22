@@ -1,8 +1,12 @@
 [package]
 name = "flowlocal"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Local, private push-to-talk dictation powered by sherpa-onnx speech models"
+authors = ["Lets Decode AI contributors"]
+license = "MIT"
+repository = "https://github.com/Lets-Decode-AI/FlowLocal"
+homepage = "https://github.com/Lets-Decode-AI/FlowLocal"
+readme = "../README.md"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
