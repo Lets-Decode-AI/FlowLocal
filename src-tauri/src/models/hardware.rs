@@ -13,7 +13,6 @@ impl Hardware {
     pub fn detect() -> Hardware {
         let mut sys = System::new();
         sys.refresh_memory();
-        sys.refresh_cpu_list(sysinfo::CpuRefreshKind::nothing());
         let arch = std::env::consts::ARCH.to_string();
         let apple_silicon = cfg!(target_os = "macos") && arch == "aarch64";
         Hardware {
@@ -32,9 +31,9 @@ const PARAKEET_V3_LANGS: &[&str] = &[
 ];
 const CJK_LANGS: &[&str] = &["zh", "ja", "ko", "yue"];
 
-/// Pick a catalog model id. Low RAM (< 4 GB) wins over locale.
+/// Pick a catalog model id. Low RAM (<= 4 GB) wins over locale.
 pub fn recommend(hw: &Hardware, locale: &str) -> &'static str {
-    if hw.total_ram_gb < 4.0 {
+    if hw.total_ram_gb <= 4.0 {
         return "moonshine-base";
     }
     let lang = locale
@@ -62,6 +61,10 @@ mod tests {
     #[test]
     fn recommend_low_ram_is_moonshine() {
         assert_eq!(recommend(&hw(3.5), "en-US"), "moonshine-base");
+    }
+    #[test]
+    fn recommend_exactly_4gb_is_moonshine() {
+        assert_eq!(recommend(&hw(4.0), "en-US"), "moonshine-base");
     }
     #[test]
     fn recommend_german_is_parakeet_v3() {
