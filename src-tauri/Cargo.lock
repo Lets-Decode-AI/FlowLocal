@@ -1583,6 +1583,7 @@ dependencies = [
  "core-foundation 0.10.1",
  "core-graphics 0.25.0",
  "cpal",
+ "crossbeam-channel",
  "enigo",
  "fs4",
  "futures-util",
