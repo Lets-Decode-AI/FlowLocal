@@ -25,7 +25,7 @@ use tauri::{
 
 const FLOWBAR_W: f64 = 220.0;
 const FLOWBAR_H: f64 = 56.0;
-const FLOWBAR_BOTTOM_MARGIN: f64 = 48.0;
+const FLOWBAR_BOTTOM_MARGIN: f64 = 16.0;
 
 /// Show the main window, creating it lazily if it does not exist.
 fn open_main_window(app: &AppHandle, route: Option<&str>) -> tauri::Result<()> {
@@ -53,19 +53,26 @@ fn open_main_window(app: &AppHandle, route: Option<&str>) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Place the Flow Bar at the bottom-center of the primary monitor.
+/// Place the Flow Bar at the bottom-center of the monitor under the cursor (falling back to the
+/// primary monitor), inside the monitor's work area when the OS reports one.
 fn position_flowbar(app: &AppHandle) -> tauri::Result<()> {
     let Some(w) = app.get_webview_window("flowbar") else {
         return Ok(());
     };
-    if let Some(m) = app.primary_monitor()? {
-        let scale = m.scale_factor();
-        let size = m.size();
-        let pos = m.position();
-        let x = pos.x as f64 + (size.width as f64 - FLOWBAR_W * scale) / 2.0;
-        let y = pos.y as f64 + size.height as f64 - (FLOWBAR_H + FLOWBAR_BOTTOM_MARGIN) * scale;
-        w.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))?;
-    }
+    let under_cursor = app
+        .cursor_position()
+        .ok()
+        .and_then(|c| app.monitor_from_point(c.x, c.y).ok().flatten());
+    let Some(m) = under_cursor.or(app.primary_monitor()?) else {
+        return Ok(());
+    };
+    let scale = m.scale_factor();
+    let wa = m.work_area();
+    // The work area already excludes the dock/taskbar; the pill sits a little above its edge.
+    let (ax, ay, aw, ah) = (wa.position.x as f64, wa.position.y as f64, wa.size.width as f64, wa.size.height as f64);
+    let x = ax + (aw - FLOWBAR_W * scale) / 2.0;
+    let y = ay + ah - (FLOWBAR_H + FLOWBAR_BOTTOM_MARGIN) * scale;
+    w.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))?;
     Ok(())
 }
 
@@ -122,6 +129,9 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let cache = state_cache.clone();
         Arc::new(move |name, value| {
             if name == events::STATE {
+                if value.get("kind").and_then(Value::as_str) == Some("recording") {
+                    let _ = position_flowbar(&h);
+                }
                 *cache.lock().unwrap_or_else(|p| p.into_inner()) = value.clone();
             }
             let _ = h.emit(name, value);
@@ -267,6 +277,10 @@ pub fn run() {
             init_backend(app)?;
             build_tray(app.handle())?;
             position_flowbar(app.handle())?;
+            if let Some(w) = app.get_webview_window("flowbar") {
+                // Click-through: the pill never steals clicks or focus.
+                w.set_ignore_cursor_events(true)?;
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
