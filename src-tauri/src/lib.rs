@@ -6,7 +6,7 @@ mod commands;
 mod dictation;
 mod events;
 mod hotkey;
-mod insert;
+pub mod insert;
 pub mod models;
 mod permissions;
 mod postprocess;
