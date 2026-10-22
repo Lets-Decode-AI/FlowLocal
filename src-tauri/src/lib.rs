@@ -1,17 +1,17 @@
 #![allow(dead_code)]
 
 mod app_state;
-mod audio;
+pub mod audio;
 mod commands;
 mod dictation;
 mod events;
 mod hotkey;
 mod insert;
-mod models;
+pub mod models;
 mod permissions;
 mod postprocess;
-mod stt;
-mod store;
+pub mod stt;
+pub mod store;
 
 use tauri::{
     menu::{Menu, MenuItem},
