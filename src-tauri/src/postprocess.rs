@@ -35,14 +35,14 @@ fn chars_eq_ignore_case(a: char, b: char) -> bool {
 /// Returns the rewritten text and whether a replacement started at index 0.
 fn apply_dictionary(text: &str, dict: &[DictEntry]) -> (String, bool) {
     // Sorted longest term first so longer matches win over shorter overlapping ones.
-    let mut entries: Vec<(Vec<char>, &str)> = dict
+    let mut entries: Vec<(Vec<char>, String)> = dict
         .iter()
         .filter_map(|d| {
             let term = d.term.split_whitespace().collect::<Vec<_>>().join(" ");
             if term.is_empty() {
                 return None;
             }
-            let out = d.replacement.as_deref().unwrap_or(&d.term);
+            let out = d.replacement.as_deref().unwrap_or(&term).to_string();
             Some((term.chars().collect(), out))
         })
         .collect();
@@ -67,7 +67,7 @@ fn apply_dictionary(text: &str, dict: &[DictEntry]) -> (String, bool) {
         match hit {
             Some((term, rep)) => {
                 out.push_str(rep);
-                first_replaced |= i == 0;
+                first_replaced |= i == 0 && !rep.is_empty();
                 i += term.len();
             }
             None => {
@@ -76,7 +76,7 @@ fn apply_dictionary(text: &str, dict: &[DictEntry]) -> (String, bool) {
             }
         }
     }
-    (out, first_replaced)
+    (out.split_whitespace().collect::<Vec<_>>().join(" "), first_replaced)
 }
 
 fn fix_first_letter(text: &str, prev: Option<char>) -> String {
@@ -84,6 +84,7 @@ fn fix_first_letter(text: &str, prev: Option<char>) -> String {
     let rest = &text[first.len_utf8()..];
     let upper = match prev {
         None => true,
+        Some(' ' | '\t') => return text.to_string(),
         Some(c) if c.is_whitespace() || matches!(c, '.' | '?' | '!') => true,
         Some(c) if c.is_alphanumeric() || matches!(c, ',' | ';' | ':') => false,
         Some(_) => return text.to_string(),
@@ -159,7 +160,7 @@ mod tests {
     #[test]
     fn no_leading_space_after_newline_or_space() {
         assert_eq!(postprocess("hello", &[], ctx(Some('\n'))), "Hello");
-        assert_eq!(postprocess("hello", &[], ctx(Some(' '))), "Hello");
+        assert_eq!(postprocess("hello", &[], ctx(Some('\r'))), "Hello");
         assert_eq!(postprocess("hello", &[], ctx(Some('('))), "hello");
         assert_eq!(postprocess("hello", &[], ctx(Some('"'))), "hello");
     }
@@ -176,5 +177,25 @@ mod tests {
         assert_eq!(postprocess("I think so", &[], ctx(Some('a'))), " I think so");
         assert_eq!(postprocess("I'm here", &[], ctx(Some(','))), " I'm here");
         assert_eq!(postprocess("I've gone", &[], ctx(Some('a'))), " I've gone");
+    }
+
+    #[test]
+    fn space_prev_keeps_stt_casing() {
+        assert_eq!(postprocess("Then we go.", &[], ctx(Some(' '))), "Then we go.");
+        assert_eq!(postprocess("then we go.", &[], ctx(Some(' '))), "then we go.");
+        assert_eq!(postprocess("then", &[], ctx(Some('\t'))), "then");
+    }
+
+    #[test]
+    fn empty_replacement_leaves_no_double_space() {
+        let d = [e("um", Some("")), e("new   york", None)];
+        assert_eq!(postprocess("so um we", &d, ctx(None)), "So we");
+        assert_eq!(postprocess("go to New York now", &d, ctx(None)), "Go to new york now");
+    }
+
+    #[test]
+    fn unicode_text_and_terms_do_not_panic() {
+        let d = [e("café", Some("Café"))];
+        assert_eq!(postprocess("élan 日本語 🎉 café", &d, ctx(Some('é'))), " élan 日本語 🎉 Café");
     }
 }
