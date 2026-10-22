@@ -39,6 +39,10 @@ pub struct ClipboardInserter<C: Clipboard, K: Keystroke> {
     secure_input: Box<dyn Fn() -> bool + Send + Sync>,
 }
 
+fn norm_nl(s: &str) -> String {
+    s.replace("\r\n", "\n")
+}
+
 impl<C: Clipboard, K: Keystroke> ClipboardInserter<C, K> {
     pub fn new(clipboard: C, keystroke: K) -> Self {
         Self {
@@ -62,7 +66,7 @@ impl<C: Clipboard, K: Keystroke> ClipboardInserter<C, K> {
 
 impl ClipboardInserter<SystemClipboard, EnigoKeystroke> {
     pub fn system() -> Self {
-        Self::new(SystemClipboard, EnigoKeystroke)
+        Self::new(SystemClipboard::new(), EnigoKeystroke)
     }
 }
 
@@ -77,12 +81,17 @@ impl<C: Clipboard + Send, K: Keystroke + Send + Sync> Inserter for ClipboardInse
             return InsertOutcome::CopiedOnly("secure input is active".into());
         }
         if let Err(e) = self.keystroke.paste() {
+            // Intentional: the dictated text stays on the clipboard so the
+            // user can paste it manually.
             return InsertOutcome::CopiedOnly(format!("paste failed: {e}"));
         }
         std::thread::sleep(self.restore_delay);
-        // Only restore if nothing else touched the clipboard since we set it.
+        // Only restore if nothing else touched the clipboard since we set it
+        // (compared with \r\n normalized: Windows may rewrite newlines).
+        // Restoring Empty clears the clipboard; file/HTML/RTF contents are not
+        // preserved in Part 1 (only text or image).
         match cb.snapshot() {
-            ClipboardSnapshot::Text(t) if t == text => {
+            ClipboardSnapshot::Text(t) if norm_nl(&t) == norm_nl(text) => {
                 if let Err(e) = cb.restore(snapshot) {
                     tracing::warn!("clipboard restore failed: {e}");
                 }
@@ -230,6 +239,20 @@ mod tests {
         let st = st.lock().unwrap();
         assert!(st.restored.is_empty());
         assert!(matches!(&st.content, ClipboardSnapshot::Text(t) if t == "user copied"));
+    }
+
+    #[test]
+    fn newline_normalized_clipboard_still_restores() {
+        let (ins, st) = rig(ClipboardSnapshot::Text("old".into()), false, false);
+        st.lock().unwrap().change_on_paste = Some("a\r\nb".into());
+        ins.insert("a\nb");
+        assert_eq!(st.lock().unwrap().restored.len(), 1);
+    }
+
+    #[test]
+    fn system_inserter_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<ClipboardInserter<SystemClipboard, EnigoKeystroke>>();
     }
 
     #[test]
