@@ -2,3 +2,585 @@ pub mod catalog;
 pub mod download;
 pub mod hardware;
 pub mod hf;
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use anyhow::{anyhow, Result};
+use tokio_util::sync::CancellationToken;
+
+use crate::store::Store;
+use catalog::{Catalog, CatalogEntry};
+pub use download::{DlStatus, DownloadError, Progress};
+use hf::HfClient;
+
+const ACTIVE_KEY: &str = "active_model";
+const MANIFEST: &str = "manifest.json";
+const PENDING: &str = "pending.json";
+const MAX_RETRIES: u32 = 3;
+const PERSIST_EVERY: u64 = 1 << 20;
+
+#[derive(Debug, Clone)]
+pub struct InstalledModel {
+    pub entry: CatalogEntry,
+    pub dir: PathBuf,
+}
+
+impl InstalledModel {
+    /// First model file whose path ends with / contains `name_suffix`
+    /// (exact path match preferred), else `dir/name_suffix`.
+    pub fn file(&self, name_suffix: &str) -> PathBuf {
+        let f = self
+            .entry
+            .files
+            .iter()
+            .find(|f| f.path == name_suffix)
+            .or_else(|| self.entry.files.iter().find(|f| f.path.ends_with(name_suffix)))
+            .or_else(|| self.entry.files.iter().find(|f| f.path.contains(name_suffix)));
+        self.dir.join(f.map(|f| f.path.as_str()).unwrap_or(name_suffix))
+    }
+}
+
+struct Running {
+    token: CancellationToken,
+    handle: tauri::async_runtime::JoinHandle<()>,
+}
+
+type FreeSpace = Arc<dyn Fn(&Path) -> u64 + Send + Sync>;
+
+#[derive(Clone)]
+pub struct Manager {
+    root: PathBuf,
+    store: Store,
+    catalog: Catalog,
+    hf: HfClient,
+    emit: Arc<dyn Fn(Progress) + Send + Sync>,
+    free_space: FreeSpace,
+    retry_base: Duration,
+    running: Arc<Mutex<HashMap<String, Running>>>,
+}
+
+fn dir_name(id: &str) -> String {
+    id.replace(['/', ':', '\\'], "__")
+}
+
+fn status_str(s: &DlStatus) -> &'static str {
+    match s {
+        DlStatus::Queued => "queued",
+        DlStatus::Downloading => "downloading",
+        DlStatus::Paused => "paused",
+        DlStatus::Verifying => "verifying",
+        DlStatus::Installed => "installed",
+        DlStatus::Failed(_) => "failed",
+    }
+}
+
+fn dir_size(dir: &Path) -> u64 {
+    let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
+    rd.flatten()
+        .map(|e| match e.metadata() {
+            Ok(m) if m.is_dir() => dir_size(&e.path()),
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+impl Manager {
+    pub fn new(
+        root: PathBuf,
+        store: Store,
+        catalog: Catalog,
+        hf: HfClient,
+        emit: Arc<dyn Fn(Progress) + Send + Sync>,
+    ) -> Self {
+        Self {
+            root,
+            store,
+            catalog,
+            hf,
+            emit,
+            free_space: Arc::new(|p| fs4::available_space(p).unwrap_or(u64::MAX)),
+            retry_base: Duration::from_millis(500),
+            running: Arc::default(),
+        }
+    }
+
+    /// Replace the free-space probe (tests).
+    pub fn with_free_space(mut self, f: FreeSpace) -> Self {
+        self.free_space = f;
+        self
+    }
+
+    /// Base delay of the retry backoff: base, 2*base, 4*base.
+    pub fn with_retry_base(mut self, d: Duration) -> Self {
+        self.retry_base = d;
+        self
+    }
+
+    pub fn model_dir(&self, id: &str) -> PathBuf {
+        self.root.join(dir_name(id))
+    }
+
+    fn read_entry(path: &Path) -> Option<CatalogEntry> {
+        serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+    }
+
+    /// Start (or restart) downloading `entry`; returns immediately.
+    pub fn install(&self, entry: CatalogEntry) {
+        let id = entry.id.clone();
+        if self.running.lock().unwrap().contains_key(&id) {
+            return;
+        }
+        let dir = self.model_dir(&id);
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join(PENDING), serde_json::to_vec(&entry).unwrap_or_default());
+        let token = CancellationToken::new();
+        let this = self.clone();
+        let t = token.clone();
+        let handle = tauri::async_runtime::spawn(async move {
+            this.run_install(entry, t).await;
+        });
+        self.running.lock().unwrap().insert(id, Running { token, handle });
+    }
+
+    pub fn resume(&self, id: &str) {
+        let dir = self.model_dir(id);
+        let entry = Self::read_entry(&dir.join(PENDING)).or_else(|| self.catalog.get(id).cloned());
+        if let Some(e) = entry {
+            self.install(e);
+        }
+    }
+
+    async fn stop(&self, id: &str) {
+        let r = self.running.lock().unwrap().remove(id);
+        if let Some(r) = r {
+            r.token.cancel();
+            let _ = r.handle.await;
+        }
+    }
+
+    pub async fn pause(&self, id: &str) {
+        self.stop(id).await;
+        let dir = self.model_dir(id);
+        let Some(entry) = Self::read_entry(&dir.join(PENDING)) else { return };
+        let total = entry.files.iter().map(|f| f.size).sum();
+        let done = self.bytes_on_disk(&entry);
+        self.report(id, done, total, DlStatus::Paused, None, 0.0);
+    }
+
+    /// Stop and delete partial files and download state.
+    pub async fn cancel(&self, id: &str) {
+        self.stop(id).await;
+        let dir = self.model_dir(id);
+        if !dir.join(MANIFEST).exists() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// Remove an installed (or partial) model and free its disk space.
+    pub async fn delete(&self, id: &str) -> Result<()> {
+        self.stop(id).await;
+        let dir = self.model_dir(id);
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+        }
+        if self.store.get_setting::<String>(ACTIVE_KEY)?.as_deref() == Some(id) {
+            self.store.set_setting(ACTIVE_KEY, &String::new())?;
+        }
+        Ok(())
+    }
+
+    pub fn installed(&self) -> Vec<InstalledModel> {
+        let Ok(rd) = std::fs::read_dir(&self.root) else { return vec![] };
+        let mut v: Vec<InstalledModel> = rd
+            .flatten()
+            .filter_map(|e| {
+                let dir = e.path();
+                Self::read_entry(&dir.join(MANIFEST)).map(|entry| InstalledModel { entry, dir })
+            })
+            .collect();
+        v.sort_by(|a, b| a.entry.id.cmp(&b.entry.id));
+        v
+    }
+
+    pub fn active(&self) -> Option<InstalledModel> {
+        let id = self.store.get_setting::<String>(ACTIVE_KEY).ok().flatten()?;
+        self.installed().into_iter().find(|m| m.entry.id == id)
+    }
+
+    pub fn set_active(&self, id: &str) -> Result<()> {
+        if !self.installed().iter().any(|m| m.entry.id == id) {
+            return Err(anyhow!("model {id} is not installed"));
+        }
+        self.store.set_setting(ACTIVE_KEY, &id.to_string())
+    }
+
+    pub fn disk_usage(&self, id: &str) -> u64 {
+        dir_size(&self.model_dir(id))
+    }
+
+    /// Re-queue downloads interrupted by a restart. Paused ones stay paused.
+    pub fn resume_incomplete_on_startup(&self) {
+        let Ok(rd) = std::fs::read_dir(&self.root) else { return };
+        for e in rd.flatten() {
+            let dir = e.path();
+            if dir.join(MANIFEST).exists() {
+                continue;
+            }
+            let Some(entry) = Self::read_entry(&dir.join(PENDING)) else { continue };
+            let rows = self.store.downloads_for(&entry.id).unwrap_or_default();
+            let paused = rows.iter().any(|r| r.status == "paused" || r.status == "failed");
+            if paused {
+                let total = entry.files.iter().map(|f| f.size).sum();
+                let done = self.bytes_on_disk(&entry);
+                self.report(&entry.id, done, total, DlStatus::Paused, None, 0.0);
+            } else {
+                self.install(entry);
+            }
+        }
+    }
+
+    fn bytes_on_disk(&self, entry: &CatalogEntry) -> u64 {
+        let dir = self.model_dir(&entry.id);
+        entry
+            .files
+            .iter()
+            .map(|f| {
+                let p = dir.join(&f.path);
+                let mut part = p.clone().into_os_string();
+                part.push(".part");
+                std::fs::metadata(&p)
+                    .or_else(|_| std::fs::metadata(PathBuf::from(part)))
+                    .map(|m| m.len())
+                    .unwrap_or(0)
+            })
+            .sum()
+    }
+
+    fn report(&self, id: &str, done: u64, total: u64, status: DlStatus, error: Option<String>, bps: f64) {
+        let eta = (bps > 1.0 && total > done).then(|| ((total - done) as f64 / bps).ceil() as u64);
+        (self.emit)(Progress {
+            model_id: id.to_string(),
+            bytes_done: done,
+            total,
+            bytes_per_sec: bps,
+            eta_secs: eta,
+            status,
+            error,
+        });
+    }
+
+    /// Emit + persist a status change for every file of the entry.
+    fn set_status(&self, entry: &CatalogEntry, done: u64, status: DlStatus, error: Option<String>) {
+        let total: u64 = entry.files.iter().map(|f| f.size).sum();
+        let s = status_str(&status);
+        for f in &entry.files {
+            let (d, t) = (self.file_done(entry, f), f.size as i64);
+            let _ = self.store.download_upsert(&entry.id, &f.path, d as i64, t, s);
+        }
+        self.report(&entry.id, done, total, status, error, 0.0);
+    }
+
+    fn file_done(&self, entry: &CatalogEntry, f: &catalog::ModelFile) -> u64 {
+        let p = self.model_dir(&entry.id).join(&f.path);
+        let mut part = p.clone().into_os_string();
+        part.push(".part");
+        std::fs::metadata(&p)
+            .or_else(|_| std::fs::metadata(PathBuf::from(part)))
+            .map(|m| m.len())
+            .unwrap_or(0)
+    }
+
+    async fn run_install(&self, entry: CatalogEntry, token: CancellationToken) {
+        let id = entry.id.clone();
+        let dir = self.model_dir(&id);
+        let total: u64 = entry.files.iter().map(|f| f.size).sum();
+        self.set_status(&entry, self.bytes_on_disk(&entry), DlStatus::Queued, None);
+
+        let remaining = total.saturating_sub(self.bytes_on_disk(&entry));
+        let free = (self.free_space)(&self.root);
+        if free < remaining {
+            let msg = format!(
+                "Not enough disk space: need {} MB, {} MB free",
+                remaining >> 20,
+                free >> 20
+            );
+            self.set_status(&entry, 0, DlStatus::Failed(msg), None);
+            self.running.lock().unwrap().remove(&id);
+            return;
+        }
+
+        let started = Instant::now();
+        let start_bytes = self.bytes_on_disk(&entry);
+        let mut base_done = 0u64;
+        for f in &entry.files {
+            let dest = dir.join(&f.path);
+            if std::fs::metadata(&dest).map(|m| m.len() == f.size).unwrap_or(false) {
+                base_done += f.size;
+                continue;
+            }
+            let url = self.hf.resolve_url(&entry.hf_repo, &entry.revision, &f.path);
+            let mut attempt = 0u32;
+            loop {
+                let cb = {
+                    let this = self.clone();
+                    let entry = entry.clone();
+                    let (size, path) = (f.size, f.path.clone());
+                    let last_persist = Mutex::new(0u64);
+                    move |n: u64| {
+                        let done = base_done + n;
+                        let status = if n >= size && size > 0 { DlStatus::Verifying } else { DlStatus::Downloading };
+                        let secs = started.elapsed().as_secs_f64().max(0.001);
+                        let bps = done.saturating_sub(start_bytes) as f64 / secs;
+                        let mut lp = last_persist.lock().unwrap();
+                        if n.saturating_sub(*lp) >= PERSIST_EVERY || n >= size {
+                            *lp = n;
+                            let _ = this.store.download_upsert(
+                                &entry.id, &path, n as i64, size as i64, status_str(&status),
+                            );
+                        }
+                        let total: u64 = entry.files.iter().map(|f| f.size).sum();
+                        this.report(&entry.id, done, total, status, None, bps);
+                    }
+                };
+                self.set_status(&entry, base_done + self.file_done(&entry, f), DlStatus::Downloading, None);
+                let res = download::download_file(&self.hf, &url, &dest, &f.sha256, f.size, token.clone(), cb).await;
+                match res {
+                    Ok(()) => break,
+                    Err(DownloadError::Cancelled) => return,
+                    Err(DownloadError::Checksum) => {
+                        self.set_status(&entry, 0, DlStatus::Failed("Checksum mismatch".into()), None);
+                        self.running.lock().unwrap().remove(&id);
+                        return;
+                    }
+                    Err(e) if attempt >= MAX_RETRIES => {
+                        let done = base_done + self.file_done(&entry, f);
+                        self.set_status(&entry, done, DlStatus::Paused, Some(e.to_string()));
+                        self.running.lock().unwrap().remove(&id);
+                        return;
+                    }
+                    Err(_) => {
+                        let delay = self.retry_base * 2u32.pow(attempt);
+                        attempt += 1;
+                        tokio::select! {
+                            _ = token.cancelled() => return,
+                            _ = tokio::time::sleep(delay) => {}
+                        }
+                    }
+                }
+            }
+            base_done += f.size;
+        }
+
+        // Manifest is written last: its presence means "installed".
+        let tmp = dir.join("manifest.json.tmp");
+        let written = serde_json::to_vec_pretty(&entry)
+            .map_err(anyhow::Error::from)
+            .and_then(|b| std::fs::write(&tmp, b).map_err(Into::into))
+            .and_then(|_| std::fs::rename(&tmp, dir.join(MANIFEST)).map_err(Into::into));
+        if let Err(e) = written {
+            self.set_status(&entry, total, DlStatus::Failed(e.to_string()), None);
+        } else {
+            let _ = std::fs::remove_file(dir.join(PENDING));
+            self.set_status(&entry, total, DlStatus::Installed, None);
+        }
+        self.running.lock().unwrap().remove(&id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::catalog::{CatalogEntry, EngineKind, ModelFile};
+    use super::download::{DlStatus, Progress};
+    use super::hf::HfClient;
+    use super::*;
+    use crate::store::Store;
+    use sha2::{Digest, Sha256};
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn sha(data: &[u8]) -> String {
+        hex::encode(Sha256::digest(data))
+    }
+
+    struct Fx {
+        server: MockServer,
+        entry: CatalogEntry,
+        events: Arc<Mutex<Vec<Progress>>>,
+        store: Store,
+        files: Vec<(String, Vec<u8>)>,
+    }
+
+    async fn fixture() -> Fx {
+        let server = MockServer::start().await;
+        let files: Vec<(String, Vec<u8>)> = vec![
+            ("encoder.onnx".into(), (0..40_000).map(|i| (i % 200) as u8).collect()),
+            ("tokens.txt".into(), b"a 0\nb 1\n".to_vec()),
+        ];
+        let entry = CatalogEntry {
+            id: "hf:owner/name".into(),
+            name: "Test".into(),
+            hf_repo: "owner/name".into(),
+            revision: "main".into(),
+            files: files.iter().map(|(p, d)| ModelFile {
+                path: p.clone(), size: d.len() as u64, sha256: sha(d),
+            }).collect(),
+            engine: EngineKind::Transducer,
+            languages: vec!["en".into()],
+            min_ram_gb: 1,
+            notes: String::new(),
+        };
+        Fx { server, entry, events: Arc::default(), store: Store::open_in_memory().unwrap(), files }
+    }
+
+    async fn mount_ok(fx: &Fx) {
+        for (p, d) in &fx.files {
+            Mock::given(method("GET")).and(path(format!("/owner/name/resolve/main/{p}")))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(d.clone()))
+                .mount(&fx.server).await;
+        }
+    }
+
+    fn manager(fx: &Fx, root: &Path) -> Manager {
+        let ev = fx.events.clone();
+        Manager::new(
+            root.to_path_buf(),
+            fx.store.clone(),
+            super::catalog::Catalog::bundled(),
+            HfClient::new(None).with_base(&fx.server.uri()),
+            Arc::new(move |p| ev.lock().unwrap().push(p)),
+        )
+        .with_free_space(Arc::new(|_| u64::MAX))
+        .with_retry_base(Duration::from_millis(1))
+    }
+
+    async fn wait_for(fx: &Fx, pred: impl Fn(&Progress) -> bool) -> Progress {
+        for _ in 0..300 {
+            if let Some(p) = fx.events.lock().unwrap().iter().rev().find(|p| pred(p)) {
+                return p.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("timeout; events: {:?}", fx.events.lock().unwrap().last());
+    }
+
+    #[tokio::test]
+    async fn manager_marks_installed_and_lists() {
+        let fx = fixture().await;
+        mount_ok(&fx).await;
+        let root = tempfile::tempdir().unwrap();
+        let m = manager(&fx, root.path());
+        assert!(m.installed().is_empty());
+        m.install(fx.entry.clone());
+        let p = wait_for(&fx, |p| p.status == DlStatus::Installed).await;
+        assert_eq!(p.model_id, "hf:owner/name");
+        let list = m.installed();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].entry.id, "hf:owner/name");
+        assert_eq!(std::fs::read(list[0].file("tokens")).unwrap(), fx.files[1].1);
+        assert!(m.disk_usage("hf:owner/name") >= 40_000);
+        assert!(m.active().is_none());
+        m.set_active("hf:owner/name").unwrap();
+        assert_eq!(m.active().unwrap().entry.id, "hf:owner/name");
+        m.delete("hf:owner/name").await.unwrap();
+        assert!(m.installed().is_empty());
+        assert!(m.active().is_none());
+    }
+
+    #[tokio::test]
+    async fn set_active_requires_installed() {
+        let fx = fixture().await;
+        let root = tempfile::tempdir().unwrap();
+        assert!(manager(&fx, root.path()).set_active("nope").is_err());
+    }
+
+    #[tokio::test]
+    async fn installs_into_dir_with_space_and_unicode() {
+        let fx = fixture().await;
+        mount_ok(&fx).await;
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().join("My Models ñ");
+        let m = manager(&fx, &root);
+        m.install(fx.entry.clone());
+        wait_for(&fx, |p| p.status == DlStatus::Installed).await;
+        let f = m.installed()[0].file("encoder");
+        assert!(f.starts_with(&root) && f.exists());
+    }
+
+    #[tokio::test]
+    async fn retries_three_times_then_paused() {
+        let fx = fixture().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(4)
+            .mount(&fx.server).await;
+        let root = tempfile::tempdir().unwrap();
+        let m = manager(&fx, root.path());
+        m.install(fx.entry.clone());
+        let p = wait_for(&fx, |p| p.status == DlStatus::Paused).await;
+        assert!(p.error.is_some());
+        fx.server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn cancel_stops_and_removes_part() {
+        let fx = fixture().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(10)).set_body_bytes(vec![0u8; 10]))
+            .mount(&fx.server).await;
+        let root = tempfile::tempdir().unwrap();
+        let m = manager(&fx, root.path());
+        let dir = m.model_dir("hf:owner/name");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("encoder.onnx.part"), b"partial").unwrap();
+        m.install(fx.entry.clone());
+        wait_for(&fx, |p| p.status == DlStatus::Downloading).await;
+        m.cancel("hf:owner/name").await;
+        assert!(!dir.exists());
+        assert!(m.installed().is_empty());
+    }
+
+    #[tokio::test]
+    async fn insufficient_disk_space_fails_early() {
+        let fx = fixture().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).expect(0).mount(&fx.server).await;
+        let root = tempfile::tempdir().unwrap();
+        let m = manager(&fx, root.path()).with_free_space(Arc::new(|_| 1));
+        m.install(fx.entry.clone());
+        let p = wait_for(&fx, |p| matches!(p.status, DlStatus::Failed(_))).await;
+        assert!(matches!(p.status, DlStatus::Failed(ref s) if s.contains("disk")));
+        fx.server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn resume_incomplete_on_startup_restarts_and_keeps_paused() {
+        let fx = fixture().await;
+        let root = tempfile::tempdir().unwrap();
+        // 1) a failing install ends Paused; a fresh manager must not restart it
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(500)).mount(&fx.server).await;
+        let m = manager(&fx, root.path());
+        m.install(fx.entry.clone());
+        wait_for(&fx, |p| p.status == DlStatus::Paused).await;
+        fx.server.reset().await;
+        mount_ok(&fx).await;
+        fx.events.lock().unwrap().clear();
+        let m2 = manager(&fx, root.path());
+        m2.resume_incomplete_on_startup();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(m2.installed().is_empty());
+        // 2) once the row says Downloading (crash mid-download) it restarts
+        for (p, d) in &fx.files {
+            fx.store.download_upsert("hf:owner/name", p, 10, d.len() as i64, "downloading").unwrap();
+        }
+        let m3 = manager(&fx, root.path());
+        m3.resume_incomplete_on_startup();
+        wait_for(&fx, |p| p.status == DlStatus::Installed).await;
+        assert_eq!(m3.installed().len(), 1);
+    }
+}

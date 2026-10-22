@@ -1584,6 +1584,8 @@ dependencies = [
  "core-graphics 0.25.0",
  "cpal",
  "enigo",
+ "fs4",
+ "futures-util",
  "hex",
  "hound",
  "keyring",
@@ -1602,6 +1604,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "wiremock",
@@ -1668,6 +1671,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs4"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e72ed92b67c146290f88e9c89d60ca163ea417a446f61ffd7b72df3e7f1dfd5"
+dependencies = [
+ "rustix 1.1.5",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3954,7 +3967,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4326,7 +4339,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

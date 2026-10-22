@@ -68,6 +68,20 @@ impl HfClient {
         self
     }
 
+    /// File URL: `{base}/{repo}/resolve/{revision}/{path}`.
+    pub(crate) fn resolve_url(&self, repo: &str, revision: &str, path: &str) -> String {
+        format!("{}/{repo}/resolve/{revision}/{path}", self.base)
+    }
+
+    /// Authenticated GET builder for an absolute URL (bearer token when set).
+    pub(crate) fn authed_get(&self, url: &str) -> reqwest::RequestBuilder {
+        let req = self.http.get(url);
+        match &self.token {
+            Some(t) => req.bearer_auth(t),
+            None => req,
+        }
+    }
+
     fn get(&self, url: &str, params: &[(&str, &str)]) -> Result<reqwest::RequestBuilder> {
         let url = reqwest::Url::parse_with_params(url, params)?;
         let req = self.http.get(url);
