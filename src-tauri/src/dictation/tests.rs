@@ -7,15 +7,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::future::BoxFuture;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::Notify;
 
 use super::*;
-use crate::audio::{RecorderError, RecordingStats, FRAME_LEN, SAMPLE_RATE};
+use crate::audio::{FRAME_LEN, RecorderError, RecordingStats, SAMPLE_RATE};
 use crate::hotkey::HotkeyEvent;
 use crate::insert::{InsertOutcome, Inserter};
-use crate::models::catalog::{CatalogEntry, EngineKind};
 use crate::models::InstalledModel;
+use crate::models::catalog::{CatalogEntry, EngineKind};
 use crate::postprocess::InsertContext;
 use crate::store::Store;
 use crate::stt::{Chunk, SttError};
@@ -45,7 +45,11 @@ fn voiced(secs: f32) -> Vec<f32> {
     (0..n)
         .map(|i| {
             let s = 0.3 * (2.0 * std::f32::consts::PI * 300.0 * i as f32 / SR as f32).sin();
-            if (i / FRAME_LEN) % 100 == 0 { s * 0.02 } else { s }
+            if (i / FRAME_LEN).is_multiple_of(100) {
+                s * 0.02
+            } else {
+                s
+            }
         })
         .collect()
 }
@@ -107,7 +111,9 @@ impl RecorderPort for FakeRecorder {
     fn stop(&self) -> Result<RecordingStats, RecorderError> {
         self.stops.fetch_add(1, Ordering::SeqCst);
         self.tx.lock().unwrap().take();
-        Ok(RecordingStats { duration_ms: 30_000 })
+        Ok(RecordingStats {
+            duration_ms: 30_000,
+        })
     }
     fn cancel(&self) {
         self.cancels.fetch_add(1, Ordering::SeqCst);
@@ -133,7 +139,10 @@ impl SessionPort for FakeSession {
     fn feed(&self, _chunk: Chunk) {
         self.log.feeds.fetch_add(1, Ordering::SeqCst);
     }
-    fn finish(self: Box<Self>, _tail: Option<Chunk>) -> BoxFuture<'static, Result<String, SttError>> {
+    fn finish(
+        self: Box<Self>,
+        _tail: Option<Chunk>,
+    ) -> BoxFuture<'static, Result<String, SttError>> {
         Box::pin(async move {
             self.log.finishes.fetch_add(1, Ordering::SeqCst);
             if let Some(g) = &self.script.gate {
@@ -152,13 +161,22 @@ struct FakeStt {
 }
 impl FakeStt {
     fn new() -> Arc<Self> {
-        Arc::new(Self { scripts: Mutex::default(), logs: Mutex::default() })
+        Arc::new(Self {
+            scripts: Mutex::default(),
+            logs: Mutex::default(),
+        })
     }
     fn push(&self, text: &str, gate: Option<Arc<Notify>>) {
-        self.scripts.lock().unwrap().push_back(Script { result: Ok(text.into()), gate });
+        self.scripts.lock().unwrap().push_back(Script {
+            result: Ok(text.into()),
+            gate,
+        });
     }
     fn push_err(&self, e: SttError) {
-        self.scripts.lock().unwrap().push_back(Script { result: Err(e), gate: None });
+        self.scripts.lock().unwrap().push_back(Script {
+            result: Err(e),
+            gate: None,
+        });
     }
     fn log(&self, i: usize) -> Arc<SessionLog> {
         self.logs.lock().unwrap()[i].clone()
@@ -171,12 +189,10 @@ impl SttPort for FakeStt {
     fn session(&self, _m: InstalledModel) -> Box<dyn SessionPort> {
         let log = Arc::new(SessionLog::default());
         self.logs.lock().unwrap().push(log.clone());
-        let script = self
-            .scripts
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or(Script { result: Ok("hello world".into()), gate: None });
+        let script = self.scripts.lock().unwrap().pop_front().unwrap_or(Script {
+            result: Ok("hello world".into()),
+            gate: None,
+        });
         Box::new(FakeSession { log, script })
     }
 }
@@ -221,7 +237,11 @@ struct Harness {
 fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
     let rec = FakeRecorder::new(audio);
     let stt = FakeStt::new();
-    let ins = Arc::new(FakeInserter { inserted: Mutex::default(), outcome: Mutex::new(InsertOutcome::Pasted), panic_next: Default::default() });
+    let ins = Arc::new(FakeInserter {
+        inserted: Mutex::default(),
+        outcome: Mutex::new(InsertOutcome::Pasted),
+        panic_next: Default::default(),
+    });
     let store = Arc::new(Store::open_in_memory().unwrap());
     let events: Arc<Mutex<Vec<(String, Value)>>> = Arc::default();
     let esc: Arc<Mutex<Vec<bool>>> = Arc::default();
@@ -241,7 +261,17 @@ fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
         arm_esc: Arc::new(move |b| esc2.lock().unwrap().push(b)),
         app_name: Arc::new(|| Some("Notes".to_string())),
     });
-    Harness { handle, hk, rec, stt, ins, store, events, esc, level_tx }
+    Harness {
+        handle,
+        hk,
+        rec,
+        stt,
+        ins,
+        store,
+        events,
+        esc,
+        level_tx,
+    }
 }
 
 impl Harness {
@@ -249,10 +279,19 @@ impl Harness {
         self.hk.send(e).unwrap();
     }
     fn states(&self) -> Vec<Value> {
-        self.events.lock().unwrap().iter().filter(|(n, _)| n == crate::events::STATE).map(|(_, v)| v.clone()).collect()
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(n, _)| n == crate::events::STATE)
+            .map(|(_, v)| v.clone())
+            .collect()
     }
     fn kinds(&self) -> Vec<String> {
-        self.states().iter().map(|v| v["kind"].as_str().unwrap().to_string()).collect()
+        self.states()
+            .iter()
+            .map(|v| v["kind"].as_str().unwrap().to_string())
+            .collect()
     }
     fn inserted(&self) -> Vec<String> {
         self.ins.inserted.lock().unwrap().clone()
@@ -290,22 +329,40 @@ async fn hold_speak_release_inserts_and_persists() {
     let h = harness(voiced(2.0), true);
     h.stt.push("hello  world", None);
     h.send(HotkeyEvent::Pressed);
-    wait_for("recording started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
+    wait_for("recording started", || {
+        h.rec.starts.load(Ordering::SeqCst) == 1
+    })
+    .await;
     advance(1000).await;
     h.send(HotkeyEvent::Released);
     wait_for("persisted", || h.saved().len() == 1).await;
-    wait_for("idle", || h.kinds().last().map(String::as_str) == Some("idle")).await;
+    wait_for("idle", || {
+        h.kinds().last().map(String::as_str) == Some("idle")
+    })
+    .await;
 
     assert_eq!(h.inserted(), vec!["Hello world".to_string()]);
     let t = &h.saved()[0];
-    assert_eq!((t.text.as_str(), t.raw_text.as_str()), ("Hello world", "hello  world"));
+    assert_eq!(
+        (t.text.as_str(), t.raw_text.as_str()),
+        ("Hello world", "hello  world")
+    );
     assert_eq!(t.app_name.as_deref(), Some("Notes"));
     assert_eq!(t.model_id, "m1");
     assert_eq!((t.duration_ms, t.word_count), (30_000, 2));
     assert!((t.wpm - 4.0).abs() < 1e-9, "wpm {}", t.wpm); // 2 words in 0.5 min
-    assert_eq!(h.kinds(), ["recording", "transcribing", "inserting", "idle"]);
+    assert_eq!(
+        h.kinds(),
+        ["recording", "transcribing", "inserting", "idle"]
+    );
     assert_eq!(*h.esc.lock().unwrap(), [true, false]);
-    assert!(h.events.lock().unwrap().iter().any(|(n, _)| n == crate::events::TRANSCRIPT_ADDED));
+    assert!(
+        h.events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(n, _)| n == crate::events::TRANSCRIPT_ADDED)
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -315,8 +372,14 @@ async fn short_tap_is_discarded() {
     wait_for("started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
     advance(100).await;
     h.send(HotkeyEvent::Released);
-    wait_for("idle", || h.kinds().last().map(String::as_str) == Some("idle")).await;
-    wait_for("session cancelled", || h.stt.log(0).cancels.load(Ordering::SeqCst) == 1).await;
+    wait_for("idle", || {
+        h.kinds().last().map(String::as_str) == Some("idle")
+    })
+    .await;
+    wait_for("session cancelled", || {
+        h.stt.log(0).cancels.load(Ordering::SeqCst) == 1
+    })
+    .await;
     assert_eq!(h.rec.cancels.load(Ordering::SeqCst), 1);
     assert_eq!(h.rec.stops.load(Ordering::SeqCst), 0);
     assert!(h.inserted().is_empty() && h.saved().is_empty());
@@ -330,8 +393,14 @@ async fn no_speech_is_discarded() {
     wait_for("started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
     advance(1000).await;
     h.send(HotkeyEvent::Released);
-    wait_for("back to idle", || h.kinds().ends_with(&["transcribing".into(), "idle".into()])).await;
-    wait_for("session cancelled", || h.stt.log(0).cancels.load(Ordering::SeqCst) == 1).await;
+    wait_for("back to idle", || {
+        h.kinds().ends_with(&["transcribing".into(), "idle".into()])
+    })
+    .await;
+    wait_for("session cancelled", || {
+        h.stt.log(0).cancels.load(Ordering::SeqCst) == 1
+    })
+    .await;
     assert_eq!(h.stt.log(0).finishes.load(Ordering::SeqCst), 0);
     assert!(h.inserted().is_empty() && h.saved().is_empty());
 }
@@ -344,10 +413,17 @@ async fn chunks_fed_during_recording() {
     audio.extend(voiced(5.5));
     let h = harness(audio, true);
     h.send(HotkeyEvent::Pressed);
-    wait_for("one chunk fed before release", || h.stt.sessions() == 1 && h.stt.log(0).feeds.load(Ordering::SeqCst) == 1).await;
+    wait_for("one chunk fed before release", || {
+        h.stt.sessions() == 1 && h.stt.log(0).feeds.load(Ordering::SeqCst) == 1
+    })
+    .await;
     settle().await;
     assert_eq!(h.stt.log(0).feeds.load(Ordering::SeqCst), 1);
-    assert_eq!(h.stt.log(0).finishes.load(Ordering::SeqCst), 0, "not finished before key-up");
+    assert_eq!(
+        h.stt.log(0).finishes.load(Ordering::SeqCst),
+        0,
+        "not finished before key-up"
+    );
     assert_eq!(h.kinds(), ["recording"]);
     advance(1000).await;
     h.send(HotkeyEvent::Released);
@@ -364,7 +440,12 @@ async fn double_tap_hands_free_then_press_stops() {
     wait_for("cancelled", || h.rec.cancels.load(Ordering::SeqCst) == 1).await;
     advance(100).await;
     h.send(HotkeyEvent::DoubleTap);
-    wait_for("hands-free recording", || h.states().last().is_some_and(|s| s["kind"] == "recording" && s["handsFree"] == true)).await;
+    wait_for("hands-free recording", || {
+        h.states()
+            .last()
+            .is_some_and(|s| s["kind"] == "recording" && s["handsFree"] == true)
+    })
+    .await;
     advance(5000).await;
     assert!(h.inserted().is_empty());
     h.send(HotkeyEvent::Pressed);
@@ -377,7 +458,10 @@ async fn double_tap_hands_free_then_press_stops() {
 async fn hands_free_auto_stops_at_6_min() {
     let h = harness(voiced(2.0), true);
     h.send(HotkeyEvent::DoubleTap);
-    wait_for("hands-free recording", || h.states().last().is_some_and(|s| s["handsFree"] == true)).await;
+    wait_for("hands-free recording", || {
+        h.states().last().is_some_and(|s| s["handsFree"] == true)
+    })
+    .await;
     advance(5 * 60 * 1000).await;
     settle().await;
     assert!(h.inserted().is_empty(), "still recording at 5 min");
@@ -393,8 +477,14 @@ async fn cancel_discards() {
     wait_for("started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
     advance(1000).await;
     h.send(HotkeyEvent::Cancel);
-    wait_for("idle", || h.kinds().last().map(String::as_str) == Some("idle")).await;
-    wait_for("session cancelled", || h.stt.log(0).cancels.load(Ordering::SeqCst) == 1).await;
+    wait_for("idle", || {
+        h.kinds().last().map(String::as_str) == Some("idle")
+    })
+    .await;
+    wait_for("session cancelled", || {
+        h.stt.log(0).cancels.load(Ordering::SeqCst) == 1
+    })
+    .await;
     assert_eq!(h.rec.cancels.load(Ordering::SeqCst), 1);
     assert!(h.inserted().is_empty() && h.saved().is_empty());
     assert_eq!(*h.esc.lock().unwrap(), [true, false]);
@@ -404,12 +494,24 @@ async fn cancel_discards() {
 async fn no_model_shows_error() {
     let h = harness(voiced(1.0), false);
     h.send(HotkeyEvent::Pressed);
-    wait_for("error state", || h.states().iter().any(|s| s["kind"] == "error" && s["message"] == "No model installed")).await;
+    wait_for("error state", || {
+        h.states()
+            .iter()
+            .any(|s| s["kind"] == "error" && s["message"] == "No model installed")
+    })
+    .await;
     assert_eq!(h.rec.starts.load(Ordering::SeqCst), 0);
-    assert!(!h.kinds().contains(&"recording".to_string()), "no recording flicker: {:?}", h.kinds());
+    assert!(
+        !h.kinds().contains(&"recording".to_string()),
+        "no recording flicker: {:?}",
+        h.kinds()
+    );
     assert!(h.esc.lock().unwrap().is_empty(), "Esc never armed");
     advance(2100).await;
-    wait_for("idle after 2 s", || h.kinds().last().map(String::as_str) == Some("idle")).await;
+    wait_for("idle after 2 s", || {
+        h.kinds().last().map(String::as_str) == Some("idle")
+    })
+    .await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -423,16 +525,29 @@ async fn press_during_transcribing_starts_new_recording() {
     wait_for("A started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
     advance(1000).await;
     h.send(HotkeyEvent::Released);
-    wait_for("A transcribing", || h.stt.log(0).finishes.load(Ordering::SeqCst) == 1).await;
+    wait_for("A transcribing", || {
+        h.stt.log(0).finishes.load(Ordering::SeqCst) == 1
+    })
+    .await;
 
     h.send(HotkeyEvent::Pressed);
     wait_for("B recording", || h.rec.starts.load(Ordering::SeqCst) == 2).await;
-    wait_for("recording state", || h.kinds().last().map(String::as_str) == Some("recording")).await;
+    wait_for("recording state", || {
+        h.kinds().last().map(String::as_str) == Some("recording")
+    })
+    .await;
     advance(1000).await;
     h.send(HotkeyEvent::Released);
-    wait_for("B finished", || h.stt.log(1).finishes.load(Ordering::SeqCst) == 1).await;
+    wait_for("B finished", || {
+        h.stt.log(1).finishes.load(Ordering::SeqCst) == 1
+    })
+    .await;
     settle().await;
-    assert!(h.inserted().is_empty(), "B must wait for A: {:?}", h.inserted());
+    assert!(
+        h.inserted().is_empty(),
+        "B must wait for A: {:?}",
+        h.inserted()
+    );
 
     gate_a.notify_one();
     wait_for("both inserted", || h.inserted().len() == 2).await;
@@ -440,7 +555,10 @@ async fn press_during_transcribing_starts_new_recording() {
     wait_for("both persisted", || h.saved().len() == 2).await;
     let texts: Vec<_> = h.saved().into_iter().map(|t| t.text).collect(); // newest first
     assert_eq!(texts, ["Beta", "Alpha"]);
-    wait_for("idle", || h.kinds().last().map(String::as_str) == Some("idle")).await;
+    wait_for("idle", || {
+        h.kinds().last().map(String::as_str) == Some("idle")
+    })
+    .await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -449,13 +567,18 @@ async fn recorder_error_goes_to_error_then_idle() {
     *h.rec.start_error.lock().unwrap() = Some(RecorderError::PermissionDenied);
     h.send(HotkeyEvent::Pressed);
     wait_for("error state", || {
-        h.states().iter().any(|s| s["kind"] == "error" && s["message"] == "microphone permission denied")
+        h.states()
+            .iter()
+            .any(|s| s["kind"] == "error" && s["message"] == "microphone permission denied")
     })
     .await;
     assert!(h.inserted().is_empty());
     advance(2100).await;
-    wait_for("idle", || h.kinds().last().map(String::as_str) == Some("idle")).await;
-    assert_eq!(*h.esc.lock().unwrap().last().unwrap(), false);
+    wait_for("idle", || {
+        h.kinds().last().map(String::as_str) == Some("idle")
+    })
+    .await;
+    assert!(!*h.esc.lock().unwrap().last().unwrap());
 }
 
 #[tokio::test(start_paused = true)]
@@ -467,8 +590,14 @@ async fn copied_only_emits_toast_and_still_persists() {
     advance(1000).await;
     h.send(HotkeyEvent::Released);
     wait_for("persisted", || h.saved().len() == 1).await;
-    let toasts: Vec<Value> =
-        h.events.lock().unwrap().iter().filter(|(n, _)| n == crate::events::TOAST).map(|(_, v)| v.clone()).collect();
+    let toasts: Vec<Value> = h
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(n, _)| n == crate::events::TOAST)
+        .map(|(_, v)| v.clone())
+        .collect();
     assert_eq!(toasts.len(), 1);
     assert_eq!(toasts[0]["message"], json!("secure input is active"));
 }
@@ -488,7 +617,10 @@ async fn paused_ignores_hotkeys() {
     wait_for("started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
     h.handle.set_paused(true);
     wait_for("cancelled", || h.rec.cancels.load(Ordering::SeqCst) == 1).await;
-    wait_for("idle", || h.kinds().last().map(String::as_str) == Some("idle")).await;
+    wait_for("idle", || {
+        h.kinds().last().map(String::as_str) == Some("idle")
+    })
+    .await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -501,8 +633,14 @@ async fn levels_are_throttled_to_30hz() {
         }
     }
     settle().await;
-    let n = h.events.lock().unwrap().iter().filter(|(name, _)| name == crate::events::LEVEL).count();
-    assert!(n >= 1 && n <= 5, "{n} level events for a ~25 ms burst");
+    let n = h
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(name, _)| name == crate::events::LEVEL)
+        .count();
+    assert!((1..=5).contains(&n), "{n} level events for a ~25 ms burst");
 }
 
 #[tokio::test(start_paused = true)]
@@ -512,15 +650,26 @@ async fn device_lost_mid_recording_shows_error_promptly() {
     h.send(HotkeyEvent::Pressed);
     // No Released is ever sent: the loss must be noticed on its own.
     wait_for("error state", || {
-        h.states().iter().any(|s| s["kind"] == "error" && s["message"] == "input device was lost")
+        h.states()
+            .iter()
+            .any(|s| s["kind"] == "error" && s["message"] == "input device was lost")
     })
     .await;
-    wait_for("session cancelled", || h.stt.log(0).cancels.load(Ordering::SeqCst) == 1).await;
-    wait_for("recorder cancelled", || h.rec.cancels.load(Ordering::SeqCst) == 1).await;
+    wait_for("session cancelled", || {
+        h.stt.log(0).cancels.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    wait_for("recorder cancelled", || {
+        h.rec.cancels.load(Ordering::SeqCst) == 1
+    })
+    .await;
     assert_eq!(*h.esc.lock().unwrap(), [true, false]);
     assert!(h.inserted().is_empty());
     advance(2100).await;
-    wait_for("idle", || h.kinds().last().map(String::as_str) == Some("idle")).await;
+    wait_for("idle", || {
+        h.kinds().last().map(String::as_str) == Some("idle")
+    })
+    .await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -531,7 +680,10 @@ async fn insert_panic_does_not_block_next_utterance() {
     wait_for("A started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
     advance(1000).await;
     h.send(HotkeyEvent::Released);
-    wait_for("error after panic", || h.states().iter().any(|s| s["kind"] == "error")).await;
+    wait_for("error after panic", || {
+        h.states().iter().any(|s| s["kind"] == "error")
+    })
+    .await;
     assert!(h.saved().is_empty());
 
     h.send(HotkeyEvent::Pressed);
@@ -550,7 +702,12 @@ async fn stt_error_in_a_still_inserts_b() {
     wait_for("A started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
     advance(1000).await;
     h.send(HotkeyEvent::Released);
-    wait_for("A error", || h.states().iter().any(|s| s["kind"] == "error" && s["message"].as_str().is_some_and(|m| m.contains("boom")))).await;
+    wait_for("A error", || {
+        h.states().iter().any(|s| {
+            s["kind"] == "error" && s["message"].as_str().is_some_and(|m| m.contains("boom"))
+        })
+    })
+    .await;
 
     h.send(HotkeyEvent::Pressed);
     wait_for("B started", || h.rec.starts.load(Ordering::SeqCst) == 2).await;

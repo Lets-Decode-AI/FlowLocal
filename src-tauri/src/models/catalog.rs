@@ -63,8 +63,13 @@ mod tests {
         let mut ids: Vec<&str> = c.entries().iter().map(|e| e.id.as_str()).collect();
         ids.sort();
         let mut want = vec![
-            "moonshine-base", "parakeet-v2", "parakeet-v3", "sensevoice-small",
-            "whisper-small-en", "whisper-tiny-en", "whisper-turbo",
+            "moonshine-base",
+            "parakeet-v2",
+            "parakeet-v3",
+            "sensevoice-small",
+            "whisper-small-en",
+            "whisper-tiny-en",
+            "whisper-turbo",
         ];
         want.sort();
         assert_eq!(ids, want);

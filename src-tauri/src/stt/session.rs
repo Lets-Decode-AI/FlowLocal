@@ -7,8 +7,8 @@ use tokio::sync::oneshot;
 
 use super::chunker::join_chunks;
 use super::worker::{Job, SttHandle};
-use crate::models::InstalledModel;
 use super::{Chunk, SttError};
+use crate::models::InstalledModel;
 
 pub struct SttSession {
     handle: SttHandle,
@@ -21,7 +21,13 @@ pub struct SttSession {
 
 impl SttSession {
     pub(super) fn new(handle: SttHandle, model: InstalledModel) -> Self {
-        Self { handle, model, cancelled: Arc::default(), worker_gone: AtomicBool::new(false), pending: Mutex::default() }
+        Self {
+            handle,
+            model,
+            cancelled: Arc::default(),
+            worker_gone: AtomicBool::new(false),
+            pending: Mutex::default(),
+        }
     }
 
     /// Queue a chunk for transcription; returns immediately. Chunks without speech are skipped.
@@ -30,7 +36,12 @@ impl SttSession {
             return;
         }
         let (reply, rx) = oneshot::channel();
-        let job = Job { model: self.model.clone(), samples: chunk.samples, cancelled: self.cancelled.clone(), reply };
+        let job = Job {
+            model: self.model.clone(),
+            samples: chunk.samples,
+            cancelled: self.cancelled.clone(),
+            reply,
+        };
         if self.handle.submit(job) {
             self.pending.lock().unwrap().push(rx);
         } else {
@@ -67,7 +78,6 @@ impl Drop for SttSession {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
@@ -78,7 +88,10 @@ mod tests {
     #[tokio::test]
     async fn session_transcribes_chunks_in_order_while_feeding() {
         let probe = Probe::default();
-        let h = SttWorker::spawn(Box::new(FakeEngine::new(&probe, Duration::from_millis(50))), None);
+        let h = SttWorker::spawn(
+            Box::new(FakeEngine::new(&probe, Duration::from_millis(50))),
+            None,
+        );
         let s = h.session(fake_model("a"));
         for i in 0..3 {
             s.feed(speech_chunk(i));
@@ -88,15 +101,25 @@ mod tests {
         let text = s.finish(None).await.unwrap();
         assert_eq!(text, "c0 c1 c2");
         let started = probe.time_of("start c0").unwrap();
-        assert!(started < before_finish, "chunk 0 started before finish was called");
-        let order: Vec<_> = probe.names().into_iter().filter(|n| n.starts_with("start")).collect();
+        assert!(
+            started < before_finish,
+            "chunk 0 started before finish was called"
+        );
+        let order: Vec<_> = probe
+            .names()
+            .into_iter()
+            .filter(|n| n.starts_with("start"))
+            .collect();
         assert_eq!(order, ["start c0", "start c1", "start c2"]);
     }
 
     #[tokio::test]
     async fn session_finish_latency_is_only_tail() {
         let probe = Probe::default();
-        let h = SttWorker::spawn(Box::new(FakeEngine::new(&probe, Duration::from_millis(100))), None);
+        let h = SttWorker::spawn(
+            Box::new(FakeEngine::new(&probe, Duration::from_millis(100))),
+            None,
+        );
         h.preload(fake_model("a")).await.unwrap();
         let s = h.session(fake_model("a"));
         for i in 0..5 {
@@ -113,7 +136,10 @@ mod tests {
     #[tokio::test]
     async fn session_cancel_drops_pending() {
         let probe = Probe::default();
-        let h = SttWorker::spawn(Box::new(FakeEngine::new(&probe, Duration::from_millis(100))), None);
+        let h = SttWorker::spawn(
+            Box::new(FakeEngine::new(&probe, Duration::from_millis(100))),
+            None,
+        );
         let s = h.session(fake_model("a"));
         for i in 0..4 {
             s.feed(speech_chunk(i));
@@ -121,7 +147,12 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(30)).await; // c0 in flight
         s.cancel();
         tokio::time::sleep(Duration::from_millis(400)).await;
-        assert_eq!(probe.count("start"), 1, "queued chunks dropped: {:?}", probe.names());
+        assert_eq!(
+            probe.count("start"),
+            1,
+            "queued chunks dropped: {:?}",
+            probe.names()
+        );
         // the worker still serves the next session
         let s2 = h.session(fake_model("a"));
         s2.feed(speech_chunk(9));
@@ -133,9 +164,17 @@ mod tests {
         let probe = Probe::default();
         let h = SttWorker::spawn(Box::new(FakeEngine::new(&probe, Duration::ZERO)), None);
         let s = h.session(fake_model("a"));
-        s.feed(Chunk { samples: vec![7.0; 160], has_speech: false, start_ms: 0 });
+        s.feed(Chunk {
+            samples: vec![7.0; 160],
+            has_speech: false,
+            start_ms: 0,
+        });
         s.feed(speech_chunk(1));
-        let silent_tail = Chunk { samples: vec![8.0; 160], has_speech: false, start_ms: 0 };
+        let silent_tail = Chunk {
+            samples: vec![8.0; 160],
+            has_speech: false,
+            start_ms: 0,
+        };
         assert_eq!(s.finish(Some(silent_tail)).await.unwrap(), "c1");
         assert_eq!(probe.count("start"), 1);
     }

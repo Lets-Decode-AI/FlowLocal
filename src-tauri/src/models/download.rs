@@ -55,7 +55,10 @@ pub struct Throttle {
 
 impl Throttle {
     pub fn new(interval: Duration) -> Self {
-        Self { interval, last: None }
+        Self {
+            interval,
+            last: None,
+        }
     }
 
     pub fn ready(&mut self, now: Instant) -> bool {
@@ -92,7 +95,10 @@ pub async fn download_file(
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    let mut have = tokio::fs::metadata(&part).await.map(|m| m.len()).unwrap_or(0);
+    let mut have = tokio::fs::metadata(&part)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
     if total > 0 && have > total {
         tokio::fs::remove_file(&part).await?;
         have = 0;
@@ -195,20 +201,31 @@ mod tests {
     async fn downloads_and_verifies() {
         let server = MockServer::start().await;
         let data = body(300_000);
-        Mock::given(method("GET")).and(path("/f.bin"))
+        Mock::given(method("GET"))
+            .and(path("/f.bin"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone()))
-            .mount(&server).await;
+            .mount(&server)
+            .await;
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("f.bin");
         let last = std::sync::atomic::AtomicU64::new(0);
         download_file(
-            &HfClient::new(None), &format!("{}/f.bin", server.uri()), &dest,
-            &sha(&data), data.len() as u64, CancellationToken::new(),
+            &HfClient::new(None),
+            &format!("{}/f.bin", server.uri()),
+            &dest,
+            &sha(&data),
+            data.len() as u64,
+            CancellationToken::new(),
             |n| last.store(n, std::sync::atomic::Ordering::SeqCst),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), data);
         assert!(!dir.path().join("f.bin.part").exists());
-        assert_eq!(last.load(std::sync::atomic::Ordering::SeqCst), data.len() as u64);
+        assert_eq!(
+            last.load(std::sync::atomic::Ordering::SeqCst),
+            data.len() as u64
+        );
     }
 
     #[tokio::test]
@@ -216,17 +233,27 @@ mod tests {
         let server = MockServer::start().await;
         let data = body(100_000);
         let half = 50_000;
-        Mock::given(method("GET")).and(path("/f.bin")).and(header("range", "bytes=50000-"))
+        Mock::given(method("GET"))
+            .and(path("/f.bin"))
+            .and(header("range", "bytes=50000-"))
             .respond_with(ResponseTemplate::new(206).set_body_bytes(data[half..].to_vec()))
             .expect(1)
-            .mount(&server).await;
+            .mount(&server)
+            .await;
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("f.bin");
         std::fs::write(dir.path().join("f.bin.part"), &data[..half]).unwrap();
         download_file(
-            &HfClient::new(None), &format!("{}/f.bin", server.uri()), &dest,
-            &sha(&data), data.len() as u64, CancellationToken::new(), |_| {},
-        ).await.unwrap();
+            &HfClient::new(None),
+            &format!("{}/f.bin", server.uri()),
+            &dest,
+            &sha(&data),
+            data.len() as u64,
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), data);
     }
 
@@ -234,15 +261,24 @@ mod tests {
     async fn checksum_mismatch_deletes_part() {
         let server = MockServer::start().await;
         let data = body(10_000);
-        Mock::given(method("GET")).and(path("/f.bin"))
+        Mock::given(method("GET"))
+            .and(path("/f.bin"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone()))
-            .mount(&server).await;
+            .mount(&server)
+            .await;
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("f.bin");
         let err = download_file(
-            &HfClient::new(None), &format!("{}/f.bin", server.uri()), &dest,
-            &"0".repeat(64), data.len() as u64, CancellationToken::new(), |_| {},
-        ).await.unwrap_err();
+            &HfClient::new(None),
+            &format!("{}/f.bin", server.uri()),
+            &dest,
+            &"0".repeat(64),
+            data.len() as u64,
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, DownloadError::Checksum));
         assert!(!dest.exists());
         assert!(!dir.path().join("f.bin.part").exists());
@@ -252,17 +288,37 @@ mod tests {
     async fn empty_sha_verifies_length_instead() {
         let server = MockServer::start().await;
         let data = body(10_000);
-        Mock::given(method("GET")).and(path("/f.bin"))
+        Mock::given(method("GET"))
+            .and(path("/f.bin"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone()))
-            .mount(&server).await;
+            .mount(&server)
+            .await;
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("f.bin");
         let url = format!("{}/f.bin", server.uri());
-        download_file(&HfClient::new(None), &url, &dest, "", 10_000, CancellationToken::new(), |_| {})
-            .await.unwrap();
+        download_file(
+            &HfClient::new(None),
+            &url,
+            &dest,
+            "",
+            10_000,
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap();
         let dest2 = dir.path().join("g.bin");
-        let err = download_file(&HfClient::new(None), &url, &dest2, "", 9_999, CancellationToken::new(), |_| {})
-            .await.unwrap_err();
+        let err = download_file(
+            &HfClient::new(None),
+            &url,
+            &dest2,
+            "",
+            9_999,
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, DownloadError::Checksum));
     }
 
@@ -282,16 +338,25 @@ mod tests {
     async fn range_ignored_200_restarts_part() {
         let server = MockServer::start().await;
         let data = body(100_000);
-        Mock::given(method("GET")).and(path("/f.bin"))
+        Mock::given(method("GET"))
+            .and(path("/f.bin"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone()))
-            .mount(&server).await;
+            .mount(&server)
+            .await;
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("f.bin");
         std::fs::write(dir.path().join("f.bin.part"), vec![0xAAu8; 50_000]).unwrap();
         download_file(
-            &HfClient::new(None), &format!("{}/f.bin", server.uri()), &dest,
-            &sha(&data), data.len() as u64, CancellationToken::new(), |_| {},
-        ).await.unwrap();
+            &HfClient::new(None),
+            &format!("{}/f.bin", server.uri()),
+            &dest,
+            &sha(&data),
+            data.len() as u64,
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), data);
     }
 }

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod app_state;
 pub mod audio;
 pub mod commands;
@@ -10,18 +8,18 @@ pub mod insert;
 pub mod models;
 pub mod permissions;
 mod postprocess;
-pub mod stt;
 pub mod store;
+pub mod stt;
 pub mod tray;
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent,
     menu::{Menu, MenuItem, Submenu},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
 const FLOWBAR_W: f64 = 220.0;
@@ -70,7 +68,12 @@ fn position_flowbar(app: &AppHandle) -> tauri::Result<()> {
     let scale = m.scale_factor();
     let wa = m.work_area();
     // The work area already excludes the dock/taskbar; the pill sits a little above its edge.
-    let (ax, ay, aw, ah) = (wa.position.x as f64, wa.position.y as f64, wa.size.width as f64, wa.size.height as f64);
+    let (ax, ay, aw, ah) = (
+        wa.position.x as f64,
+        wa.position.y as f64,
+        wa.size.width as f64,
+        wa.size.height as f64,
+    );
     let x = ax + (aw - FLOWBAR_W * scale) / 2.0;
     let y = ay + ah - (FLOWBAR_H + FLOWBAR_BOTTOM_MARGIN) * scale;
     w.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))?;
@@ -120,7 +123,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 
 /// Opens the store, builds every subsystem and registers `AppState`.
 fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    use app_state::{AppState, SwitchableRecorder, SETTINGS_KEY};
+    use app_state::{AppState, SETTINGS_KEY, SwitchableRecorder};
     use hotkey::HotkeyService;
 
     let handle = app.handle().clone();
@@ -132,7 +135,7 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Emit bridge; also caches the latest dictation state for `get_state`.
     let state_cache = Arc::new(Mutex::new(json!({ "kind": "idle" })));
-    let emit: Arc<dyn Fn(&str, Value) + Send + Sync> = {
+    let emit: dictation::EmitFn = {
         let h = handle.clone();
         let cache = state_cache.clone();
         Arc::new(move |name, value| {
@@ -170,15 +173,15 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Speech worker.
     let stt = stt::SttWorker::spawn(Box::new(stt::SherpaEngine::new()), settings.idle_unload());
-    if settings.preload {
-        if let Some(m) = models.active() {
-            let stt = stt.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = stt.preload(m).await {
-                    tracing::warn!("model preload failed: {e}");
-                }
-            });
-        }
+    if settings.preload
+        && let Some(m) = models.active()
+    {
+        let stt = stt.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = stt.preload(m).await {
+                tracing::warn!("model preload failed: {e}");
+            }
+        });
     }
     tracing::info!("speech worker spawned");
 
@@ -197,8 +200,15 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         hk_tx.clone(),
         std::time::Duration::from_millis(2500), // let the webviews subscribe before the toast
     );
-    app_state::reconcile_autostart(&store, &settings_arc, &app_state::PluginAutostart(handle.clone()));
-    let settings = settings_arc.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    app_state::reconcile_autostart(
+        &store,
+        &settings_arc,
+        &app_state::PluginAutostart(handle.clone()),
+    );
+    let settings = settings_arc
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
 
     // Controller (needs a tokio runtime context).
     let store = Arc::new(store);
@@ -252,9 +262,17 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "flowlocal_lib=info".into())).try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "flowlocal_lib=info".into()),
+        )
+        .try_init();
     tauri::Builder::default()
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             commands::get_state,
             commands::set_paused,
@@ -298,10 +316,10 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app, event| {
             // Keep running in the tray when all windows are closed.
-            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
-                if code.is_none() {
-                    api.prevent_exit();
-                }
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event
+                && code.is_none()
+            {
+                api.prevent_exit();
             }
         });
 }

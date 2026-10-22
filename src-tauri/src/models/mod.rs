@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use tokio_util::sync::CancellationToken;
 
 use crate::store::Store;
@@ -37,9 +37,20 @@ impl InstalledModel {
             .files
             .iter()
             .find(|f| f.path == name_suffix)
-            .or_else(|| self.entry.files.iter().find(|f| f.path.ends_with(name_suffix)))
-            .or_else(|| self.entry.files.iter().find(|f| f.path.contains(name_suffix)));
-        self.dir.join(f.map(|f| f.path.as_str()).unwrap_or(name_suffix))
+            .or_else(|| {
+                self.entry
+                    .files
+                    .iter()
+                    .find(|f| f.path.ends_with(name_suffix))
+            })
+            .or_else(|| {
+                self.entry
+                    .files
+                    .iter()
+                    .find(|f| f.path.contains(name_suffix))
+            });
+        self.dir
+            .join(f.map(|f| f.path.as_str()).unwrap_or(name_suffix))
     }
 }
 
@@ -80,7 +91,9 @@ fn status_str(s: &DlStatus) -> &'static str {
 }
 
 fn dir_size(dir: &Path) -> u64 {
-    let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return 0;
+    };
     rd.flatten()
         .map(|e| match e.metadata() {
             Ok(m) if m.is_dir() => dir_size(&e.path()),
@@ -142,15 +155,27 @@ impl Manager {
         }
         let dir = self.model_dir(&id);
         let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(dir.join(PENDING), serde_json::to_vec(&entry).unwrap_or_default());
-        let run_gen = self.next_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _ = std::fs::write(
+            dir.join(PENDING),
+            serde_json::to_vec(&entry).unwrap_or_default(),
+        );
+        let run_gen = self
+            .next_gen
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let token = CancellationToken::new();
         let this = self.clone();
         let t = token.clone();
         let handle = tauri::async_runtime::spawn(async move {
             this.run_install(entry, t, run_gen).await;
         });
-        running.insert(id, Running { run_gen, token, handle });
+        running.insert(
+            id,
+            Running {
+                run_gen,
+                token,
+                handle,
+            },
+        );
     }
 
     pub fn resume(&self, id: &str) {
@@ -172,7 +197,9 @@ impl Manager {
     pub async fn pause(&self, id: &str) {
         self.stop(id).await;
         let dir = self.model_dir(id);
-        let Some(entry) = Self::read_entry(&dir.join(PENDING)) else { return };
+        let Some(entry) = Self::read_entry(&dir.join(PENDING)) else {
+            return;
+        };
         let done = self.bytes_on_disk(&entry);
         self.set_status(&entry, done, DlStatus::Paused, None);
     }
@@ -200,7 +227,9 @@ impl Manager {
     }
 
     pub fn installed(&self) -> Vec<InstalledModel> {
-        let Ok(rd) = std::fs::read_dir(&self.root) else { return vec![] };
+        let Ok(rd) = std::fs::read_dir(&self.root) else {
+            return vec![];
+        };
         let mut v: Vec<InstalledModel> = rd
             .flatten()
             .filter_map(|e| {
@@ -213,7 +242,11 @@ impl Manager {
     }
 
     pub fn active(&self) -> Option<InstalledModel> {
-        let id = self.store.get_setting::<String>(ACTIVE_KEY).ok().flatten()?;
+        let id = self
+            .store
+            .get_setting::<String>(ACTIVE_KEY)
+            .ok()
+            .flatten()?;
         self.installed().into_iter().find(|m| m.entry.id == id)
     }
 
@@ -230,15 +263,21 @@ impl Manager {
 
     /// Re-queue downloads interrupted by a restart. Paused ones stay paused.
     pub fn resume_incomplete_on_startup(&self) {
-        let Ok(rd) = std::fs::read_dir(&self.root) else { return };
+        let Ok(rd) = std::fs::read_dir(&self.root) else {
+            return;
+        };
         for e in rd.flatten() {
             let dir = e.path();
             if dir.join(MANIFEST).exists() {
                 continue;
             }
-            let Some(entry) = Self::read_entry(&dir.join(PENDING)) else { continue };
+            let Some(entry) = Self::read_entry(&dir.join(PENDING)) else {
+                continue;
+            };
             let rows = self.store.downloads_for(&entry.id).unwrap_or_default();
-            let paused = rows.iter().any(|r| r.status == "paused" || r.status == "failed");
+            let paused = rows
+                .iter()
+                .any(|r| r.status == "paused" || r.status == "failed");
             if paused {
                 let total = entry.files.iter().map(|f| f.size).sum();
                 let done = self.bytes_on_disk(&entry);
@@ -266,7 +305,15 @@ impl Manager {
             .sum()
     }
 
-    fn report(&self, id: &str, done: u64, total: u64, status: DlStatus, error: Option<String>, bps: f64) {
+    fn report(
+        &self,
+        id: &str,
+        done: u64,
+        total: u64,
+        status: DlStatus,
+        error: Option<String>,
+        bps: f64,
+    ) {
         let eta = (bps > 1.0 && total > done).then(|| ((total - done) as f64 / bps).ceil() as u64);
         (self.emit)(Progress {
             model_id: id.to_string(),
@@ -285,7 +332,9 @@ impl Manager {
         let s = status_str(&status);
         for f in &entry.files {
             let (d, t) = (self.file_done(entry, f), f.size as i64);
-            let _ = self.store.download_upsert(&entry.id, &f.path, d as i64, t, s);
+            let _ = self
+                .store
+                .download_upsert(&entry.id, &f.path, d as i64, t, s);
         }
         self.report(&entry.id, done, total, status, error, 0.0);
     }
@@ -331,7 +380,11 @@ impl Manager {
                 .components()
                 .all(|c| matches!(c, std::path::Component::Normal(_)));
             if !ok || f.path.is_empty() {
-                return Some((0, DlStatus::Failed(format!("Invalid file path: {}", f.path)), None));
+                return Some((
+                    0,
+                    DlStatus::Failed(format!("Invalid file path: {}", f.path)),
+                    None,
+                ));
             }
         }
         let dir = self.model_dir(&id);
@@ -354,11 +407,16 @@ impl Manager {
         let mut base_done = 0u64;
         for f in &entry.files {
             let dest = dir.join(&f.path);
-            if std::fs::metadata(&dest).map(|m| m.len() == f.size).unwrap_or(false) {
+            if std::fs::metadata(&dest)
+                .map(|m| m.len() == f.size)
+                .unwrap_or(false)
+            {
                 base_done += f.size;
                 continue;
             }
-            let url = self.hf.resolve_url(&entry.hf_repo, &entry.revision, &f.path);
+            let url = self
+                .hf
+                .resolve_url(&entry.hf_repo, &entry.revision, &f.path);
             let mut attempt = 0u32;
             loop {
                 let cb = {
@@ -368,22 +426,44 @@ impl Manager {
                     let last_persist = Mutex::new(0u64);
                     move |n: u64| {
                         let done = base_done + n;
-                        let status = if n >= size && size > 0 { DlStatus::Verifying } else { DlStatus::Downloading };
+                        let status = if n >= size && size > 0 {
+                            DlStatus::Verifying
+                        } else {
+                            DlStatus::Downloading
+                        };
                         let secs = started.elapsed().as_secs_f64().max(0.001);
                         let bps = done.saturating_sub(start_bytes) as f64 / secs;
                         let mut lp = last_persist.lock().unwrap();
                         if n.saturating_sub(*lp) >= PERSIST_EVERY || n >= size {
                             *lp = n;
                             let _ = this.store.download_upsert(
-                                &entry.id, &path, n as i64, size as i64, status_str(&status),
+                                &entry.id,
+                                &path,
+                                n as i64,
+                                size as i64,
+                                status_str(&status),
                             );
                         }
                         let total: u64 = entry.files.iter().map(|f| f.size).sum();
                         this.report(&entry.id, done, total, status, None, bps);
                     }
                 };
-                self.set_status(&entry, base_done + self.file_done(&entry, f), DlStatus::Downloading, None);
-                let res = download::download_file(&self.hf, &url, &dest, &f.sha256, f.size, token.clone(), cb).await;
+                self.set_status(
+                    &entry,
+                    base_done + self.file_done(&entry, f),
+                    DlStatus::Downloading,
+                    None,
+                );
+                let res = download::download_file(
+                    &self.hf,
+                    &url,
+                    &dest,
+                    &f.sha256,
+                    f.size,
+                    token.clone(),
+                    cb,
+                )
+                .await;
                 match res {
                     Ok(()) => break,
                     Err(DownloadError::Cancelled) => return None,
@@ -450,7 +530,10 @@ mod tests {
     async fn fixture() -> Fx {
         let server = MockServer::start().await;
         let files: Vec<(String, Vec<u8>)> = vec![
-            ("encoder.onnx".into(), (0..40_000).map(|i| (i % 200) as u8).collect()),
+            (
+                "encoder.onnx".into(),
+                (0..40_000).map(|i| (i % 200) as u8).collect(),
+            ),
             ("tokens.txt".into(), b"a 0\nb 1\n".to_vec()),
         ];
         let entry = CatalogEntry {
@@ -458,22 +541,35 @@ mod tests {
             name: "Test".into(),
             hf_repo: "owner/name".into(),
             revision: "main".into(),
-            files: files.iter().map(|(p, d)| ModelFile {
-                path: p.clone(), size: d.len() as u64, sha256: sha(d),
-            }).collect(),
+            files: files
+                .iter()
+                .map(|(p, d)| ModelFile {
+                    path: p.clone(),
+                    size: d.len() as u64,
+                    sha256: sha(d),
+                })
+                .collect(),
             engine: EngineKind::Transducer,
             languages: vec!["en".into()],
             min_ram_gb: 1,
             notes: String::new(),
         };
-        Fx { server, entry, events: Arc::default(), store: Store::open_in_memory().unwrap(), files }
+        Fx {
+            server,
+            entry,
+            events: Arc::default(),
+            store: Store::open_in_memory().unwrap(),
+            files,
+        }
     }
 
     async fn mount_ok(fx: &Fx) {
         for (p, d) in &fx.files {
-            Mock::given(method("GET")).and(path(format!("/owner/name/resolve/main/{p}")))
+            Mock::given(method("GET"))
+                .and(path(format!("/owner/name/resolve/main/{p}")))
                 .respond_with(ResponseTemplate::new(200).set_body_bytes(d.clone()))
-                .mount(&fx.server).await;
+                .mount(&fx.server)
+                .await;
         }
     }
 
@@ -513,7 +609,10 @@ mod tests {
         let list = m.installed();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].entry.id, "hf:owner/name");
-        assert_eq!(std::fs::read(list[0].file("tokens")).unwrap(), fx.files[1].1);
+        assert_eq!(
+            std::fs::read(list[0].file("tokens")).unwrap(),
+            fx.files[1].1
+        );
         assert!(m.disk_usage("hf:owner/name") >= 40_000);
         assert!(m.active().is_none());
         m.set_active("hf:owner/name").unwrap();
@@ -549,7 +648,8 @@ mod tests {
         Mock::given(method("GET"))
             .respond_with(ResponseTemplate::new(500))
             .expect(4)
-            .mount(&fx.server).await;
+            .mount(&fx.server)
+            .await;
         let root = tempfile::tempdir().unwrap();
         let m = manager(&fx, root.path());
         m.install(fx.entry.clone());
@@ -562,8 +662,13 @@ mod tests {
     async fn cancel_stops_and_removes_part() {
         let fx = fixture().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(10)).set_body_bytes(vec![0u8; 10]))
-            .mount(&fx.server).await;
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_secs(10))
+                    .set_body_bytes(vec![0u8; 10]),
+            )
+            .mount(&fx.server)
+            .await;
         let root = tempfile::tempdir().unwrap();
         let m = manager(&fx, root.path());
         let dir = m.model_dir("hf:owner/name");
@@ -579,7 +684,11 @@ mod tests {
     #[tokio::test]
     async fn insufficient_disk_space_fails_early() {
         let fx = fixture().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).expect(0).mount(&fx.server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&fx.server)
+            .await;
         let root = tempfile::tempdir().unwrap();
         let m = manager(&fx, root.path()).with_free_space(Arc::new(|_| 1));
         m.install(fx.entry.clone());
@@ -593,7 +702,10 @@ mod tests {
         let fx = fixture().await;
         let root = tempfile::tempdir().unwrap();
         // 1) a failing install ends Paused; a fresh manager must not restart it
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(500)).mount(&fx.server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&fx.server)
+            .await;
         let m = manager(&fx, root.path());
         m.install(fx.entry.clone());
         wait_for(&fx, |p| p.status == DlStatus::Paused).await;
@@ -606,7 +718,9 @@ mod tests {
         assert!(m2.installed().is_empty());
         // 2) once the row says Downloading (crash mid-download) it restarts
         for (p, d) in &fx.files {
-            fx.store.download_upsert("hf:owner/name", p, 10, d.len() as i64, "downloading").unwrap();
+            fx.store
+                .download_upsert("hf:owner/name", p, 10, d.len() as i64, "downloading")
+                .unwrap();
         }
         let m3 = manager(&fx, root.path());
         m3.resume_incomplete_on_startup();
@@ -618,8 +732,13 @@ mod tests {
     async fn user_pause_survives_restart() {
         let fx = fixture().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(10)).set_body_bytes(vec![0u8; 10]))
-            .mount(&fx.server).await;
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_secs(10))
+                    .set_body_bytes(vec![0u8; 10]),
+            )
+            .mount(&fx.server)
+            .await;
         let root = tempfile::tempdir().unwrap();
         let m = manager(&fx, root.path());
         m.install(fx.entry.clone());
@@ -632,7 +751,10 @@ mod tests {
         m2.resume_incomplete_on_startup();
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert_eq!(fx.server.received_requests().await.unwrap().len(), before);
-        assert_eq!(fx.events.lock().unwrap().last().unwrap().status, DlStatus::Paused);
+        assert_eq!(
+            fx.events.lock().unwrap().last().unwrap().status,
+            DlStatus::Paused
+        );
     }
 
     #[tokio::test]
@@ -642,8 +764,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let free = Arc::new(std::sync::atomic::AtomicU64::new(1));
         let f2 = free.clone();
-        let m = manager(&fx, root.path())
-            .with_free_space(Arc::new(move |_| f2.load(std::sync::atomic::Ordering::SeqCst)));
+        let m = manager(&fx, root.path()).with_free_space(Arc::new(move |_| {
+            f2.load(std::sync::atomic::Ordering::SeqCst)
+        }));
         m.install(fx.entry.clone());
         wait_for(&fx, |p| matches!(p.status, DlStatus::Failed(_))).await;
         free.store(u64::MAX, std::sync::atomic::Ordering::SeqCst);
@@ -655,10 +778,12 @@ mod tests {
     async fn double_install_spawns_once() {
         let fx = fixture().await;
         for (p, d) in &fx.files {
-            Mock::given(method("GET")).and(path(format!("/owner/name/resolve/main/{p}")))
+            Mock::given(method("GET"))
+                .and(path(format!("/owner/name/resolve/main/{p}")))
                 .respond_with(ResponseTemplate::new(200).set_body_bytes(d.clone()))
                 .expect(1)
-                .mount(&fx.server).await;
+                .mount(&fx.server)
+                .await;
         }
         let root = tempfile::tempdir().unwrap();
         let m = manager(&fx, root.path());

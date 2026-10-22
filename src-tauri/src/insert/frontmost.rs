@@ -58,9 +58,11 @@ mod imp {
     use std::path::Path;
     use windows_sys::Win32::Foundation::{CloseHandle, MAX_PATH};
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
 
     pub fn frontmost_app_name() -> Option<String> {
         unsafe {
@@ -85,7 +87,9 @@ mod imp {
                 return None;
             }
             let path = String::from_utf16_lossy(&buf[..len as usize]);
-            Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned())
+            Path::new(&path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
         }
     }
 

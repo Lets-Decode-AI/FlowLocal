@@ -1,7 +1,7 @@
 //! Streaming chunk planner: cuts live 16 kHz audio into chunks at natural pauses while the user
 //! is still speaking, so chunks can be transcribed in the background.
 
-use crate::audio::vad::{rms, trim_silence, FrameClassifier};
+use crate::audio::vad::{FrameClassifier, rms, trim_silence};
 use crate::audio::{FRAME_LEN, FRAME_MS, SAMPLE_RATE};
 
 /// A span of audio to transcribe.
@@ -27,7 +27,12 @@ pub struct ChunkerConfig {
 
 impl Default for ChunkerConfig {
     fn default() -> Self {
-        Self { min_secs: 4.0, pause_ms: 300, max_secs: 15.0, search_back_secs: 3.0 }
+        Self {
+            min_secs: 4.0,
+            pause_ms: 300,
+            max_secs: 15.0,
+            search_back_secs: 3.0,
+        }
     }
 }
 
@@ -89,7 +94,7 @@ impl ChunkPlanner {
         let whole = self.carry.len() / FRAME_LEN * FRAME_LEN;
         let rest = self.carry.split_off(whole);
         let data = std::mem::replace(&mut self.carry, rest);
-        for frame in data.chunks_exact(FRAME_LEN) {
+        for frame in data.as_chunks::<FRAME_LEN>().0 {
             self.add_frame(frame);
             if let Some(cut) = self.cut_point() {
                 out.push(self.take_chunk(cut));
@@ -101,7 +106,10 @@ impl ChunkPlanner {
     fn add_frame(&mut self, frame: &[f32]) {
         let speech = self.classifier.is_speech(frame);
         self.buf.extend_from_slice(frame);
-        self.frames.push(FrameInfo { speech, rms: rms(frame) });
+        self.frames.push(FrameInfo {
+            speech,
+            rms: rms(frame),
+        });
         if speech {
             self.silence_run = 0;
             self.chunk_has_speech = true;
@@ -120,11 +128,16 @@ impl ChunkPlanner {
             return Some(n - self.silence_run + self.silence_run / 2);
         }
         if n >= Self::frames_for(self.cfg.max_secs) {
-            let from = n.saturating_sub(Self::frames_for(self.cfg.search_back_secs)).max(1);
+            let from = n
+                .saturating_sub(Self::frames_for(self.cfg.search_back_secs))
+                .max(1);
             // Quietest frame; the latest one on ties, to keep chunks long.
             let quietest = (from..n)
                 .min_by(|&a, &b| {
-                    self.frames[a].rms.total_cmp(&self.frames[b].rms).then(b.cmp(&a))
+                    self.frames[a]
+                        .rms
+                        .total_cmp(&self.frames[b].rms)
+                        .then(b.cmp(&a))
                 })
                 .unwrap_or(n);
             return Some(quietest);
@@ -160,8 +173,13 @@ impl ChunkPlanner {
         self.chunk_has_speech = false;
         let trimmed = trim_silence(&all)?;
         // `trimmed` is a subslice of `all`: recover its offset.
-        let offset = (trimmed.as_ptr() as usize - all.as_ptr() as usize) / std::mem::size_of::<f32>();
-        Some(Chunk { samples: trimmed.to_vec(), has_speech: true, start_ms: ms_of(start + offset as u64) })
+        let offset =
+            (trimmed.as_ptr() as usize - all.as_ptr() as usize) / std::mem::size_of::<f32>();
+        Some(Chunk {
+            samples: trimmed.to_vec(),
+            has_speech: true,
+            start_ms: ms_of(start + offset as u64),
+        })
     }
 }
 
@@ -205,7 +223,11 @@ mod tests {
         (0..n)
             .map(|i| {
                 let s = 0.3 * (2.0 * std::f32::consts::PI * 300.0 * i as f32 / SR as f32).sin();
-                if (i / FRAME_LEN) % 100 == 0 { s * 0.02 } else { s }
+                if (i / FRAME_LEN).is_multiple_of(100) {
+                    s * 0.02
+                } else {
+                    s
+                }
             })
             .collect()
     }
@@ -264,7 +286,11 @@ mod tests {
         let c = &chunks[0];
         assert!(secs(c.samples.len()) <= 15.0);
         let diff = (c.samples.len() as i64 - at as i64).abs();
-        assert!(diff <= FRAME_LEN as i64, "cut at {} s", secs(c.samples.len()));
+        assert!(
+            diff <= FRAME_LEN as i64,
+            "cut at {} s",
+            secs(c.samples.len())
+        );
     }
 
     /// Deterministic stream of speech bursts and pauses, `total` seconds long.
@@ -295,7 +321,11 @@ mod tests {
         let mut pos = 0usize;
         let mut joined = Vec::new();
         for c in &chunks {
-            assert!(secs(c.samples.len()) <= 15.0, "chunk of {} s", secs(c.samples.len()));
+            assert!(
+                secs(c.samples.len()) <= 15.0,
+                "chunk of {} s",
+                secs(c.samples.len())
+            );
             assert_eq!(c.start_ms as usize, pos * 1000 / SR, "contiguous start");
             joined.extend_from_slice(&c.samples);
             pos += c.samples.len();

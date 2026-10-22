@@ -3,8 +3,8 @@ pub mod migrations;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use anyhow::{anyhow, Result};
-use rusqlite::{params, Connection};
+use anyhow::{Result, anyhow};
+use rusqlite::{Connection, params};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -69,11 +69,15 @@ impl Store {
 
     fn init(mut conn: Connection) -> Result<Store> {
         migrations::migrate(&mut conn)?;
-        Ok(Store { conn: Arc::new(Mutex::new(conn)) })
+        Ok(Store {
+            conn: Arc::new(Mutex::new(conn)),
+        })
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>> {
-        self.conn.lock().map_err(|_| anyhow!("store mutex poisoned"))
+        self.conn
+            .lock()
+            .map_err(|_| anyhow!("store mutex poisoned"))
     }
 
     pub fn schema_version(&self) -> Result<i64> {
@@ -87,8 +91,14 @@ impl Store {
              (created_at, text, raw_text, app_name, duration_ms, word_count, wpm, model_id)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
             params![
-                t.created_at, t.text, t.raw_text, t.app_name, t.duration_ms, t.word_count,
-                t.wpm, t.model_id
+                t.created_at,
+                t.text,
+                t.raw_text,
+                t.app_name,
+                t.duration_ms,
+                t.word_count,
+                t.wpm,
+                t.model_id
             ],
         )?;
         Ok(conn.last_insert_rowid())
@@ -105,7 +115,10 @@ impl Store {
         let pattern = query
             .filter(|q| !q.is_empty())
             .map(|q| {
-                let esc = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+                let esc = q
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_");
                 format!("%{esc}%")
             })
             .unwrap_or_else(|| "%".to_string());
@@ -132,7 +145,8 @@ impl Store {
     }
 
     pub fn delete_transcript(&self, id: i64) -> Result<()> {
-        self.lock()?.execute("DELETE FROM transcripts WHERE id = ?1", [id])?;
+        self.lock()?
+            .execute("DELETE FROM transcripts WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -163,7 +177,11 @@ impl Store {
         let conn = self.lock()?;
         let mut stmt = conn.prepare("SELECT id, term, replacement FROM dictionary ORDER BY id")?;
         let rows = stmt.query_map([], |r| {
-            Ok(DictEntry { id: r.get(0)?, term: r.get(1)?, replacement: r.get(2)? })
+            Ok(DictEntry {
+                id: r.get(0)?,
+                term: r.get(1)?,
+                replacement: r.get(2)?,
+            })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
@@ -178,7 +196,8 @@ impl Store {
     }
 
     pub fn dictionary_delete(&self, id: i64) -> Result<()> {
-        self.lock()?.execute("DELETE FROM dictionary WHERE id = ?1", [id])?;
+        self.lock()?
+            .execute("DELETE FROM dictionary WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -283,7 +302,8 @@ mod tests {
     #[test]
     fn downloads_upsert() {
         let s = Store::open_in_memory().unwrap();
-        s.download_upsert("m", "a.onnx", 1, 10, "downloading").unwrap();
+        s.download_upsert("m", "a.onnx", 1, 10, "downloading")
+            .unwrap();
         s.download_upsert("m", "a.onnx", 10, 10, "done").unwrap();
         let d = s.downloads_for("m").unwrap();
         assert_eq!(d.len(), 1);

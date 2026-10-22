@@ -53,7 +53,9 @@ impl SystemClipboard {
         let job: Job = Box::new(move |cb| {
             let _ = rtx.send(cb.as_mut().map(f));
         });
-        self.tx.send(job).map_err(|_| anyhow::anyhow!("clipboard thread gone"))?;
+        self.tx
+            .send(job)
+            .map_err(|_| anyhow::anyhow!("clipboard thread gone"))?;
         rrx.recv()
             .map_err(|_| anyhow::anyhow!("clipboard thread gone"))?
             .ok_or_else(|| anyhow::anyhow!("clipboard unavailable"))

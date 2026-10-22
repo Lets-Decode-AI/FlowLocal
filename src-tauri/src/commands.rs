@@ -9,9 +9,12 @@ use std::time::Duration;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager as _, State};
 
-use crate::app_state::{binding_to_reapply, commit_settings, os_locale, recommend_dto, AppState, InstalledModelDto, PluginAutostart, RecommendDto, Settings};
+use crate::app_state::{
+    AppState, InstalledModelDto, PluginAutostart, RecommendDto, Settings, binding_to_reapply,
+    commit_settings, os_locale, recommend_dto,
+};
 use crate::events;
-use crate::hotkey::{default_binding, fallback_binding, HotkeyError, HotkeyEvent, HotkeyService};
+use crate::hotkey::{HotkeyError, HotkeyEvent, HotkeyService, default_binding, fallback_binding};
 use crate::models::catalog::{Catalog, CatalogEntry};
 use crate::models::hardware::Hardware;
 use crate::models::hf::{HfRepoSummary, Inspection};
@@ -27,15 +30,28 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 }
 
 pub fn stored_hf_token() -> Option<String> {
-    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()?.get_password().ok().filter(|t| !t.is_empty())
+    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+        .ok()?
+        .get_password()
+        .ok()
+        .filter(|t| !t.is_empty())
 }
 
 /// Pause/resume dictation and keep the tray item's label in sync.
 pub fn apply_paused(st: &AppState, paused: bool) {
     st.controller.set_paused(paused);
     st.paused.store(paused, Ordering::SeqCst);
-    if let Some(item) = st.pause_item.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        let _ = item.set_text(if paused { "Resume dictation" } else { "Pause dictation" });
+    if let Some(item) = st
+        .pause_item
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .as_ref()
+    {
+        let _ = item.set_text(if paused {
+            "Resume dictation"
+        } else {
+            "Pause dictation"
+        });
     }
 }
 
@@ -46,7 +62,10 @@ pub fn set_flowbar_visible(app: &AppHandle, visible: bool) {
 }
 
 pub fn toast(app: &AppHandle, level: &str, message: &str) {
-    let _ = app.emit(events::TOAST, serde_json::json!({ "level": level, "message": message }));
+    let _ = app.emit(
+        events::TOAST,
+        serde_json::json!({ "level": level, "message": message }),
+    );
 }
 
 /// Starts the hotkey service on its own thread (the macOS tap can block ~300 ms) unless one is
@@ -123,7 +142,12 @@ pub fn spawn_hotkey_start(
 /// Persist `new` and apply every changed field live. Autostart (the fallible part) is applied
 /// before anything is saved, so a failure leaves the stored settings untouched.
 pub fn apply_settings(app: &AppHandle, st: &AppState, new: Settings) -> Result<(), String> {
-    let old = commit_settings(&st.store, &st.settings, &PluginAutostart(app.clone()), new.clone())?;
+    let old = commit_settings(
+        &st.store,
+        &st.settings,
+        &PluginAutostart(app.clone()),
+        new.clone(),
+    )?;
 
     if new.hotkey != old.hotkey {
         let g = st.hotkey.lock().unwrap_or_else(|p| p.into_inner());
@@ -161,7 +185,10 @@ pub fn apply_settings(app: &AppHandle, st: &AppState, new: Settings) -> Result<(
 
 #[tauri::command]
 pub fn get_state(st: State<'_, AppState>) -> Value {
-    st.dictation_state.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    st.dictation_state
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
 }
 
 #[tauri::command]
@@ -224,10 +251,17 @@ pub async fn hf_inspect(st: State<'_, AppState>, repo: String) -> Result<Inspect
 
 /// Install a catalog model by `id`, or a custom (HF-inspected) `entry`.
 #[tauri::command]
-pub fn model_install(st: State<'_, AppState>, id: Option<String>, entry: Option<CatalogEntry>) -> Result<(), String> {
+pub fn model_install(
+    st: State<'_, AppState>,
+    id: Option<String>,
+    entry: Option<CatalogEntry>,
+) -> Result<(), String> {
     let entry = match (entry, id) {
         (Some(e), _) => e,
-        (None, Some(id)) => Catalog::bundled().get(&id).cloned().ok_or_else(|| format!("unknown model {id}"))?,
+        (None, Some(id)) => Catalog::bundled()
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| format!("unknown model {id}"))?,
         (None, None) => return Err("model_install needs an id or an entry".into()),
     };
     st.models.install(entry);
@@ -252,7 +286,11 @@ pub async fn model_cancel(st: State<'_, AppState>, id: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub async fn model_delete(app: AppHandle, st: State<'_, AppState>, id: String) -> Result<(), String> {
+pub async fn model_delete(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
     let r = st.models.delete(&id).await.map_err(err);
     crate::tray::refresh_models_menu(&app);
     r
@@ -268,8 +306,14 @@ pub fn model_set_active(app: AppHandle, st: State<'_, AppState>, id: String) -> 
 // ---- history / dictionary ------------------------------------------------------------------
 
 #[tauri::command(async)]
-pub fn history_list(st: State<'_, AppState>, page: u32, query: Option<String>) -> Result<Vec<Transcript>, String> {
-    st.store.list_transcripts(page, HISTORY_PAGE_SIZE, query.as_deref()).map_err(err)
+pub fn history_list(
+    st: State<'_, AppState>,
+    page: u32,
+    query: Option<String>,
+) -> Result<Vec<Transcript>, String> {
+    st.store
+        .list_transcripts(page, HISTORY_PAGE_SIZE, query.as_deref())
+        .map_err(err)
 }
 
 #[tauri::command(async)]
@@ -283,8 +327,14 @@ pub fn dictionary_list(st: State<'_, AppState>) -> Result<Vec<DictEntry>, String
 }
 
 #[tauri::command(async)]
-pub fn dictionary_add(st: State<'_, AppState>, term: String, replacement: Option<String>) -> Result<i64, String> {
-    st.store.dictionary_add(&term, replacement.as_deref()).map_err(err)
+pub fn dictionary_add(
+    st: State<'_, AppState>,
+    term: String,
+    replacement: Option<String>,
+) -> Result<i64, String> {
+    st.store
+        .dictionary_add(&term, replacement.as_deref())
+        .map_err(err)
 }
 
 #[tauri::command(async)]
@@ -296,11 +346,18 @@ pub fn dictionary_delete(st: State<'_, AppState>, id: i64) -> Result<(), String>
 
 #[tauri::command]
 pub fn settings_get(st: State<'_, AppState>) -> Settings {
-    st.settings.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    st.settings
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
 }
 
 #[tauri::command]
-pub fn settings_set(app: AppHandle, st: State<'_, AppState>, settings: Settings) -> Result<(), String> {
+pub fn settings_set(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    settings: Settings,
+) -> Result<(), String> {
     apply_settings(&app, &st, settings)
 }
 

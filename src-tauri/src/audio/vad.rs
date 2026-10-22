@@ -39,7 +39,10 @@ struct NoiseTracker {
 
 impl NoiseTracker {
     fn new() -> Self {
-        Self { frame: 0, mins: VecDeque::from([(0, SEED_FLOOR)]) }
+        Self {
+            frame: 0,
+            mins: VecDeque::from([(0, SEED_FLOOR)]),
+        }
     }
 
     fn floor(&self) -> f32 {
@@ -52,7 +55,11 @@ impl NoiseTracker {
             self.mins.pop_back();
         }
         self.mins.push_back((self.frame, level));
-        while self.mins.front().is_some_and(|m| m.0 + FLOOR_WINDOW_FRAMES <= self.frame) {
+        while self
+            .mins
+            .front()
+            .is_some_and(|m| m.0 + FLOOR_WINDOW_FRAMES <= self.frame)
+        {
             self.mins.pop_front();
         }
     }
@@ -71,7 +78,9 @@ impl Default for FrameClassifier {
 
 impl FrameClassifier {
     pub fn new() -> Self {
-        Self { tracker: NoiseTracker::new() }
+        Self {
+            tracker: NoiseTracker::new(),
+        }
     }
 
     /// Current noise-floor estimate.
@@ -91,7 +100,12 @@ impl FrameClassifier {
 /// Per-frame speech flags for a clip, using exactly the online classifier.
 pub fn speech_flags(samples: &[f32]) -> Vec<bool> {
     let mut c = FrameClassifier::new();
-    samples.chunks_exact(FRAME_LEN).map(|f| c.is_speech(f)).collect()
+    samples
+        .as_chunks::<FRAME_LEN>()
+        .0
+        .iter()
+        .map(|f| c.is_speech(f))
+        .collect()
 }
 
 /// Trim leading/trailing non-speech (keeping 200 ms padding). `None` when no frame
@@ -147,9 +161,15 @@ mod tests {
         let mut c = FrameClassifier::new();
         let n = noise(1.0, 0.005);
         let t = tone(0.5);
-        assert!(n.chunks_exact(FRAME_LEN).all(|f| !c.is_speech(f)));
-        assert!(t.chunks_exact(FRAME_LEN).all(|f| c.is_speech(f)));
-        assert!(n.chunks_exact(FRAME_LEN).skip(5).all(|f| !c.is_speech(f)));
+        assert!(n.as_chunks::<FRAME_LEN>().0.iter().all(|f| !c.is_speech(f)));
+        assert!(t.as_chunks::<FRAME_LEN>().0.iter().all(|f| c.is_speech(f)));
+        assert!(
+            n.as_chunks::<FRAME_LEN>()
+                .0
+                .iter()
+                .skip(5)
+                .all(|f| !c.is_speech(f))
+        );
     }
 
     #[test]
@@ -157,8 +177,13 @@ mod tests {
         let mut s = vec![0.0; 16_000];
         s.extend(tone(1.0));
         let mut c = FrameClassifier::new();
-        let online: usize = s.chunks_exact(FRAME_LEN).filter(|f| c.is_speech(f)).count();
-        assert!(online >= 45 && online <= 55, "online speech frames {online}");
+        let online: usize = s
+            .as_chunks::<FRAME_LEN>()
+            .0
+            .iter()
+            .filter(|f| c.is_speech(*f))
+            .count();
+        assert!((45..=55).contains(&online), "online speech frames {online}");
         assert!(trim_silence(&s).is_some());
     }
 
@@ -188,7 +213,11 @@ mod tests {
         s.extend(speechlike(8.0, 0.02));
         let flags = speech_flags(&s);
         let after = &flags[25..]; // skip first 0.5 s
-        assert!(longest_false_run(after) * 20 < 300, "false pause {} ms", longest_false_run(after) * 20);
+        assert!(
+            longest_false_run(after) * 20 < 300,
+            "false pause {} ms",
+            longest_false_run(after) * 20
+        );
     }
 
     #[test]
@@ -205,9 +234,15 @@ mod tests {
         }
         let flags = speech_flags(&s);
         for g in gaps {
-            assert!(flags[g..g + 20].iter().all(|f| !f), "gap at frame {g} classified as speech");
+            assert!(
+                flags[g..g + 20].iter().all(|f| !f),
+                "gap at frame {g} classified as speech"
+            );
         }
-        assert!(flags[11 * 50 + 10..11 * 50 + 40].iter().all(|f| *f), "burst not speech");
+        assert!(
+            flags[11 * 50 + 10..11 * 50 + 40].iter().all(|f| *f),
+            "burst not speech"
+        );
     }
 
     #[test]
@@ -216,7 +251,12 @@ mod tests {
         s.extend(speechlike(1.5, 0.1));
         s.extend(noise(1.0, 0.004));
         let mut c = FrameClassifier::new();
-        let flags: Vec<bool> = s.chunks_exact(FRAME_LEN).map(|f| c.is_speech(f)).collect();
+        let flags: Vec<bool> = s
+            .as_chunks::<FRAME_LEN>()
+            .0
+            .iter()
+            .map(|f| c.is_speech(f))
+            .collect();
         assert_eq!(flags, speech_flags(&s));
         let first = flags.iter().position(|&f| f).unwrap();
         let last = flags.iter().rposition(|&f| f).unwrap();

@@ -73,7 +73,9 @@ pub fn default_binding() -> Binding {
 /// Binding to use when the default `Fn` key cannot be observed (macOS event
 /// tap unavailable). Applying it is the settings layer's decision.
 pub fn fallback_binding() -> Binding {
-    Binding { keys: vec![Key::AltRight] }
+    Binding {
+        keys: vec![Key::AltRight],
+    }
 }
 
 /// Tracks which keys are down and reports chord transitions.
@@ -85,7 +87,11 @@ pub struct ChordTracker {
 
 impl ChordTracker {
     pub fn new(binding: Binding) -> Self {
-        Self { binding, down: HashSet::new(), active: false }
+        Self {
+            binding,
+            down: HashSet::new(),
+            active: false,
+        }
     }
 
     /// `Some(true)` when the chord becomes fully held, `Some(false)` when it
@@ -96,7 +102,8 @@ impl ChordTracker {
         } else {
             self.down.remove(&key);
         }
-        let now = !self.binding.keys.is_empty() && self.binding.keys.iter().all(|k| self.down.contains(k));
+        let now = !self.binding.keys.is_empty()
+            && self.binding.keys.iter().all(|k| self.down.contains(k));
         (now != std::mem::replace(&mut self.active, now)).then_some(now)
     }
 }
@@ -112,7 +119,13 @@ pub struct Core {
 
 impl Core {
     pub fn new(binding: Binding, tx: Sender<HotkeyEvent>) -> Self {
-        Self { chord: ChordTracker::new(binding), gesture: GestureDetector::new(), armed: false, esc_down: false, tx }
+        Self {
+            chord: ChordTracker::new(binding),
+            gesture: GestureDetector::new(),
+            armed: false,
+            esc_down: false,
+            tx,
+        }
     }
 
     fn emit(&self, events: impl IntoIterator<Item = HotkeyEvent>) {
@@ -243,7 +256,9 @@ mod tests {
         assert_eq!(s, r#"{"keys":["ControlLeft","MetaLeft"]}"#);
         assert_eq!(serde_json::from_str::<Binding>(&s).unwrap(), b);
         assert_eq!(
-            serde_json::from_str::<Binding>(r#"{"keys":["Fn"]}"#).unwrap().keys,
+            serde_json::from_str::<Binding>(r#"{"keys":["Fn"]}"#)
+                .unwrap()
+                .keys,
             vec![Key::Fn]
         );
     }
@@ -251,7 +266,12 @@ mod tests {
     #[test]
     fn escape_cancels_only_when_armed() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let mut core = Core::new(Binding { keys: vec![Key::Fn] }, tx);
+        let mut core = Core::new(
+            Binding {
+                keys: vec![Key::Fn],
+            },
+            tx,
+        );
         core.handle(Key::Escape, true);
         assert!(rx.try_recv().is_err());
         core.handle(Key::Escape, false);
@@ -263,17 +283,29 @@ mod tests {
     #[test]
     fn set_binding_mid_hold_releases() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let mut core = Core::new(Binding { keys: vec![Key::Fn] }, tx);
+        let mut core = Core::new(
+            Binding {
+                keys: vec![Key::Fn],
+            },
+            tx,
+        );
         core.handle(Key::Fn, true);
         assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Pressed);
-        core.set_binding(Binding { keys: vec![Key::AltRight] });
+        core.set_binding(Binding {
+            keys: vec![Key::AltRight],
+        });
         assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Released);
     }
 
     #[test]
     fn held_esc_cancels_once() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let mut core = Core::new(Binding { keys: vec![Key::Fn] }, tx);
+        let mut core = Core::new(
+            Binding {
+                keys: vec![Key::Fn],
+            },
+            tx,
+        );
         core.armed = true;
         core.handle(Key::Escape, true);
         core.handle(Key::Escape, true);

@@ -34,13 +34,20 @@ pub fn map_av_status(raw: isize) -> Perm {
 }
 
 pub fn status() -> PermissionsStatus {
-    PermissionsStatus { microphone: microphone(), accessibility: accessibility() }
+    PermissionsStatus {
+        microphone: microphone(),
+        accessibility: accessibility(),
+    }
 }
 
 pub fn settings_url(kind: PermKind) -> &'static str {
     match kind {
-        PermKind::Microphone => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
-        PermKind::Accessibility => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        PermKind::Microphone => {
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+        }
+        PermKind::Accessibility => {
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        }
     }
 }
 
@@ -91,7 +98,7 @@ fn accessibility() -> Perm {
 
 #[cfg(target_os = "macos")]
 mod mac {
-    use super::{map_av_status, Perm};
+    use super::{Perm, map_av_status};
     use block2::RcBlock;
     use core_foundation::base::TCFType;
     use core_foundation::boolean::CFBoolean;
@@ -108,12 +115,19 @@ mod mac {
 
     pub fn accessibility() -> Perm {
         // SAFETY: plain C call without arguments.
-        if unsafe { AXIsProcessTrusted() } { Perm::Granted } else { Perm::Denied }
+        if unsafe { AXIsProcessTrusted() } {
+            Perm::Granted
+        } else {
+            Perm::Denied
+        }
     }
 
     pub fn prompt_accessibility() {
         let key = CFString::from_static_string("AXTrustedCheckOptionPrompt");
-        let opts = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), CFBoolean::true_value().as_CFType())]);
+        let opts = CFDictionary::from_CFType_pairs(&[(
+            key.as_CFType(),
+            CFBoolean::true_value().as_CFType(),
+        )]);
         // SAFETY: `opts` is a valid CFDictionary that outlives the call.
         unsafe { AXIsProcessTrustedWithOptions(opts.as_concrete_TypeRef()) };
     }
@@ -121,7 +135,9 @@ mod mac {
     pub fn microphone() -> Perm {
         // SAFETY: AVMediaTypeAudio is a valid media type constant.
         unsafe {
-            let Some(audio) = AVMediaTypeAudio else { return Perm::Unknown };
+            let Some(audio) = AVMediaTypeAudio else {
+                return Perm::Unknown;
+            };
             map_av_status(AVCaptureDevice::authorizationStatusForMediaType(audio).0)
         }
     }
@@ -129,7 +145,9 @@ mod mac {
     pub fn request_microphone() {
         // SAFETY: the block is copied by AVFoundation; AVMediaTypeAudio is valid.
         unsafe {
-            let Some(audio) = AVMediaTypeAudio else { return };
+            let Some(audio) = AVMediaTypeAudio else {
+                return;
+            };
             let handler = RcBlock::new(|_granted: Bool| {});
             AVCaptureDevice::requestAccessForMediaType_completionHandler(audio, &handler);
         }
@@ -150,7 +168,11 @@ mod tests {
 
     #[test]
     fn perm_serializes_camel_case() {
-        let v = serde_json::to_value(PermissionsStatus { microphone: Perm::NotRequired, accessibility: Perm::Granted }).unwrap();
+        let v = serde_json::to_value(PermissionsStatus {
+            microphone: Perm::NotRequired,
+            accessibility: Perm::Granted,
+        })
+        .unwrap();
         assert_eq!(v["microphone"], "notRequired");
         assert_eq!(v["accessibility"], "granted");
     }

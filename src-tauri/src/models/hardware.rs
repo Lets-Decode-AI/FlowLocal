@@ -18,7 +18,9 @@ impl Hardware {
         let apple_silicon = cfg!(target_os = "macos") && arch == "aarch64";
         Hardware {
             total_ram_gb: sys.total_memory() as f64 / (1024.0 * 1024.0 * 1024.0),
-            cores: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
+            cores: std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1),
             arch,
             apple_silicon,
             gpu_vendor: apple_silicon.then(|| "Apple".to_string()),
@@ -27,8 +29,8 @@ impl Hardware {
 }
 
 const PARAKEET_V3_LANGS: &[&str] = &[
-    "bg", "hr", "cs", "da", "nl", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt",
-    "pl", "pt", "ro", "sk", "sl", "es", "sv", "ru", "uk",
+    "bg", "hr", "cs", "da", "nl", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt", "pl",
+    "pt", "ro", "sk", "sl", "es", "sv", "ru", "uk",
 ];
 const CJK_LANGS: &[&str] = &["zh", "ja", "ko", "yue"];
 
@@ -56,7 +58,13 @@ mod tests {
     use super::*;
 
     fn hw(ram: f64) -> Hardware {
-        Hardware { total_ram_gb: ram, cores: 8, arch: "aarch64".into(), apple_silicon: true, gpu_vendor: None }
+        Hardware {
+            total_ram_gb: ram,
+            cores: 8,
+            arch: "aarch64".into(),
+            apple_silicon: true,
+            gpu_vendor: None,
+        }
     }
 
     #[test]

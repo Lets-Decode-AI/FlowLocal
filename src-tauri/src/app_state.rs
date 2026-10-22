@@ -9,10 +9,10 @@ use serde_json::Value;
 
 use crate::audio::{Recorder, RecorderError, RecordingStats};
 use crate::dictation::{ControllerHandle, RecorderPort};
-use crate::hotkey::{default_binding, Binding, HotkeyService};
-use crate::models::catalog::CatalogEntry;
-use crate::models::hardware::{recommend, Hardware};
+use crate::hotkey::{Binding, HotkeyService, default_binding};
 use crate::models::Manager;
+use crate::models::catalog::CatalogEntry;
+use crate::models::hardware::{Hardware, recommend};
 use crate::store::Store;
 use crate::stt::SttHandle;
 
@@ -49,7 +49,8 @@ impl Default for Settings {
 
 impl Settings {
     pub fn idle_unload(&self) -> Option<std::time::Duration> {
-        self.idle_unload_min.map(|m| std::time::Duration::from_secs(u64::from(m) * 60))
+        self.idle_unload_min
+            .map(|m| std::time::Duration::from_secs(u64::from(m) * 60))
     }
 }
 
@@ -70,13 +71,20 @@ pub struct RecommendDto {
 }
 
 pub fn recommend_dto(hw: &Hardware, locale: &str) -> RecommendDto {
-    RecommendDto { id: recommend(hw, locale).to_string(), hardware: hw.clone() }
+    RecommendDto {
+        id: recommend(hw, locale).to_string(),
+        hardware: hw.clone(),
+    }
 }
 
 /// OS locale (e.g. `en-US`), falling back to `$LANG`, then `en-US`.
 pub fn os_locale() -> String {
     sys_locale::get_locale()
-        .or_else(|| std::env::var("LANG").ok().map(|l| l.split('.').next().unwrap_or("").replace('_', "-")))
+        .or_else(|| {
+            std::env::var("LANG")
+                .ok()
+                .map(|l| l.split('.').next().unwrap_or("").replace('_', "-"))
+        })
         .filter(|l| !l.is_empty())
         .unwrap_or_else(|| "en-US".into())
 }
@@ -92,7 +100,12 @@ pub struct SwitchableRecorder {
 
 impl SwitchableRecorder {
     pub fn new(mic: Option<String>, level_tx: SyncSender<f32>) -> Self {
-        Self { level_tx, current: Mutex::new(None), wanted: Mutex::new(mic), dirty: AtomicBool::new(true) }
+        Self {
+            level_tx,
+            current: Mutex::new(None),
+            wanted: Mutex::new(mic),
+            dirty: AtomicBool::new(true),
+        }
     }
 
     pub fn set_mic(&self, mic: Option<String>) {
@@ -101,13 +114,20 @@ impl SwitchableRecorder {
     }
 
     fn active(&self) -> Option<Arc<Recorder>> {
-        self.current.lock().unwrap_or_else(|p| p.into_inner()).clone()
+        self.current
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     fn recorder(&self) -> Result<Arc<Recorder>, RecorderError> {
         let mut cur = self.current.lock().unwrap_or_else(|p| p.into_inner());
         if self.dirty.swap(false, std::sync::atomic::Ordering::SeqCst) || cur.is_none() {
-            let wanted = self.wanted.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            let wanted = self
+                .wanted
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
             let rec = match Recorder::new(wanted.clone(), self.level_tx.clone()) {
                 Ok(r) => r,
                 // The chosen device vanished: fall back to the system default.
@@ -183,7 +203,8 @@ pub fn commit_settings(
     validate_settings(&new)?;
     let old = lock(current).clone();
     if new.launch_at_login != old.launch_at_login {
-        auto.set(new.launch_at_login).map_err(|e| format!("could not change launch at login: {e}"))?;
+        auto.set(new.launch_at_login)
+            .map_err(|e| format!("could not change launch at login: {e}"))?;
     }
     if let Err(e) = store.set_setting(SETTINGS_KEY, &new) {
         if new.launch_at_login != old.launch_at_login {
@@ -262,7 +283,11 @@ mod tests {
     #[test]
     fn recommend_for_this_mac_is_parakeet_v2() {
         let hw = crate::models::hardware::Hardware {
-            total_ram_gb: 16.0, cores: 8, arch: "aarch64".into(), apple_silicon: true, gpu_vendor: Some("Apple".into()),
+            total_ram_gb: 16.0,
+            cores: 8,
+            arch: "aarch64".into(),
+            apple_silicon: true,
+            gpu_vendor: Some("Apple".into()),
         };
         let r = recommend_dto(&hw, "en-US");
         assert_eq!(r.id, "parakeet-v2");
@@ -293,13 +318,24 @@ mod settings_apply_tests {
     }
 
     fn fixture(fail: bool) -> (Store, Mutex<Settings>, FakeAuto) {
-        (Store::open_in_memory().unwrap(), Mutex::new(Settings::default()), FakeAuto { enabled: Mutex::new(false), fail })
+        (
+            Store::open_in_memory().unwrap(),
+            Mutex::new(Settings::default()),
+            FakeAuto {
+                enabled: Mutex::new(false),
+                fail,
+            },
+        )
     }
 
     #[test]
     fn autostart_failure_returns_err_and_keeps_old_settings() {
         let (store, cur, auto) = fixture(true);
-        let new = Settings { launch_at_login: true, show_flowbar: false, ..Settings::default() };
+        let new = Settings {
+            launch_at_login: true,
+            show_flowbar: false,
+            ..Settings::default()
+        };
         let r = commit_settings(&store, &cur, &auto, new);
         assert!(r.is_err());
         assert_eq!(*cur.lock().unwrap(), Settings::default());
@@ -309,18 +345,29 @@ mod settings_apply_tests {
     #[test]
     fn autostart_success_persists_and_returns_old() {
         let (store, cur, auto) = fixture(false);
-        let new = Settings { launch_at_login: true, ..Settings::default() };
+        let new = Settings {
+            launch_at_login: true,
+            ..Settings::default()
+        };
         let old = commit_settings(&store, &cur, &auto, new.clone()).unwrap();
         assert_eq!(old, Settings::default());
         assert!(*auto.enabled.lock().unwrap());
         assert_eq!(*cur.lock().unwrap(), new);
-        assert_eq!(store.get_setting::<Settings>(SETTINGS_KEY).unwrap(), Some(new));
+        assert_eq!(
+            store.get_setting::<Settings>(SETTINGS_KEY).unwrap(),
+            Some(new)
+        );
     }
 
     #[test]
     fn escape_binding_rejected() {
         let (store, cur, auto) = fixture(false);
-        let new = Settings { hotkey: Binding { keys: vec![Key::ControlLeft, Key::Escape] }, ..Settings::default() };
+        let new = Settings {
+            hotkey: Binding {
+                keys: vec![Key::ControlLeft, Key::Escape],
+            },
+            ..Settings::default()
+        };
         assert!(commit_settings(&store, &cur, &auto, new).is_err());
         assert_eq!(*cur.lock().unwrap(), Settings::default());
     }
@@ -331,14 +378,40 @@ mod settings_apply_tests {
         cur.lock().unwrap().launch_at_login = true; // stored ON, OS says off
         reconcile_autostart(&store, &cur, &auto);
         assert!(!cur.lock().unwrap().launch_at_login);
-        assert!(!store.get_setting::<Settings>(SETTINGS_KEY).unwrap().unwrap().launch_at_login);
+        assert!(
+            !store
+                .get_setting::<Settings>(SETTINGS_KEY)
+                .unwrap()
+                .unwrap()
+                .launch_at_login
+        );
     }
 
     #[test]
     fn binding_change_before_service_start_is_applied() {
-        let started_with = Binding { keys: vec![Key::Fn] };
-        let cur = Mutex::new(Settings { hotkey: Binding { keys: vec![Key::AltRight] }, ..Settings::default() });
-        assert_eq!(binding_to_reapply(&started_with, &cur), Some(Binding { keys: vec![Key::AltRight] }));
-        assert_eq!(binding_to_reapply(&Binding { keys: vec![Key::AltRight] }, &cur), None);
+        let started_with = Binding {
+            keys: vec![Key::Fn],
+        };
+        let cur = Mutex::new(Settings {
+            hotkey: Binding {
+                keys: vec![Key::AltRight],
+            },
+            ..Settings::default()
+        });
+        assert_eq!(
+            binding_to_reapply(&started_with, &cur),
+            Some(Binding {
+                keys: vec![Key::AltRight]
+            })
+        );
+        assert_eq!(
+            binding_to_reapply(
+                &Binding {
+                    keys: vec![Key::AltRight]
+                },
+                &cur
+            ),
+            None
+        );
     }
 }

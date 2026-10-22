@@ -10,7 +10,7 @@ mod testutil;
 
 use crate::models::InstalledModel;
 
-pub use chunker::{join_chunks, Chunk, ChunkPlanner, ChunkerConfig};
+pub use chunker::{Chunk, ChunkPlanner, ChunkerConfig, join_chunks};
 pub use session::SttSession;
 pub use sherpa::SherpaEngine;
 pub use worker::{SttHandle, SttWorker};

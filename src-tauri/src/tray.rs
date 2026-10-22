@@ -17,7 +17,13 @@ fn entries(st: &AppState) -> Vec<(String, String, bool)> {
     st.models
         .installed()
         .into_iter()
-        .map(|m| (m.entry.id.clone(), m.entry.name.clone(), active.as_deref() == Some(m.entry.id.as_str())))
+        .map(|m| {
+            (
+                m.entry.id.clone(),
+                m.entry.name.clone(),
+                active.as_deref() == Some(m.entry.id.as_str()),
+            )
+        })
         .collect()
 }
 
@@ -30,7 +36,8 @@ pub fn model_id_from_item(item_id: &str) -> Option<&str> {
 }
 
 fn rebuild(app: &AppHandle) -> tauri::Result<()> {
-    let (Some(menu), Some(st)) = (app.try_state::<ModelsMenu>(), app.try_state::<AppState>()) else {
+    let (Some(menu), Some(st)) = (app.try_state::<ModelsMenu>(), app.try_state::<AppState>())
+    else {
         return Ok(());
     };
     let sub = &menu.0;
@@ -39,11 +46,18 @@ fn rebuild(app: &AppHandle) -> tauri::Result<()> {
     }
     let entries = entries(&st);
     if entries.is_empty() {
-        let none = tauri::menu::MenuItem::with_id(app, "model:none", "No models installed", false, None::<&str>)?;
+        let none = tauri::menu::MenuItem::with_id(
+            app,
+            "model:none",
+            "No models installed",
+            false,
+            None::<&str>,
+        )?;
         sub.append(&none)?;
     }
     for (id, name, active) in entries {
-        let item = CheckMenuItem::with_id(app, menu_item_id(&id), name, true, active, None::<&str>)?;
+        let item =
+            CheckMenuItem::with_id(app, menu_item_id(&id), name, true, active, None::<&str>)?;
         sub.append(&item)?;
     }
     Ok(())
@@ -61,10 +75,10 @@ pub fn refresh_models_menu(app: &AppHandle) {
 
 /// Tray click on a model: same path as the `model_set_active` command.
 pub fn handle_model_click(app: &AppHandle, model_id: &str) {
-    if let Some(st) = app.try_state::<AppState>() {
-        if let Err(e) = st.models.set_active(model_id) {
-            tracing::warn!("tray set_active failed: {e:#}");
-        }
+    if let Some(st) = app.try_state::<AppState>()
+        && let Err(e) = st.models.set_active(model_id)
+    {
+        tracing::warn!("tray set_active failed: {e:#}");
     }
     refresh_models_menu(app);
 }

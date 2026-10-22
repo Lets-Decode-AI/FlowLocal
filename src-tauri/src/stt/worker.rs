@@ -1,9 +1,9 @@
 //! The STT worker: one thread owns the engine and drains one FIFO command queue.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::oneshot;
@@ -20,7 +20,10 @@ pub struct Job {
 }
 
 enum Cmd {
-    Load { model: InstalledModel, reply: Option<oneshot::Sender<Result<(), SttError>>> },
+    Load {
+        model: InstalledModel,
+        reply: Option<oneshot::Sender<Result<(), SttError>>>,
+    },
     Job(Job),
     SetIdle(Option<Duration>),
 }
@@ -48,14 +51,22 @@ pub struct SttHandle {
 impl SttHandle {
     /// Starts a session and begins loading `model` right away if it is not loaded.
     pub fn session(&self, model: InstalledModel) -> SttSession {
-        let _ = self.tx.send(Cmd::Load { model: model.clone(), reply: None });
+        let _ = self.tx.send(Cmd::Load {
+            model: model.clone(),
+            reply: None,
+        });
         SttSession::new(self.clone(), model)
     }
 
     /// Loads `model` (no-op if already loaded) and waits for it.
     pub async fn preload(&self, model: InstalledModel) -> Result<(), SttError> {
         let (reply, rx) = oneshot::channel();
-        self.tx.send(Cmd::Load { model, reply: Some(reply) }).map_err(|_| SttError::WorkerGone)?;
+        self.tx
+            .send(Cmd::Load {
+                model,
+                reply: Some(reply),
+            })
+            .map_err(|_| SttError::WorkerGone)?;
         rx.await.map_err(|_| SttError::WorkerGone)?
     }
 
@@ -66,7 +77,9 @@ impl SttHandle {
     /// A handle whose worker is gone (tests).
     #[cfg(test)]
     pub(super) fn dead() -> SttHandle {
-        SttHandle { tx: mpsc::channel().0 }
+        SttHandle {
+            tx: mpsc::channel().0,
+        }
     }
 
     /// Queues a job; false if the worker is gone.
@@ -97,7 +110,10 @@ fn ensure_loaded(engine: &mut dyn SttEngine, model: &InstalledModel) -> Result<(
     Err(SttError::LoadFailed(last))
 }
 
-fn guarded_transcribe(engine: &mut dyn SttEngine, samples: &[f32]) -> Result<String, Option<String>> {
+fn guarded_transcribe(
+    engine: &mut dyn SttEngine,
+    samples: &[f32],
+) -> Result<String, Option<String>> {
     match catch_unwind(AssertUnwindSafe(|| engine.transcribe(samples))) {
         Ok(Ok(t)) => Ok(t),
         Ok(Err(e)) => Err(Some(format!("{e:#}"))),
@@ -168,8 +184,8 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::stt::testutil::*;
     use crate::stt::SttError;
+    use crate::stt::testutil::*;
 
     async fn one(h: &SttHandle, model: &str, id: usize) -> Result<String, SttError> {
         let s = h.session(fake_model(model));
@@ -192,7 +208,11 @@ mod tests {
         let h = SttWorker::spawn(Box::new(FakeEngine::new(&probe, Duration::ZERO)), None);
         one(&h, "a", 1).await.unwrap();
         one(&h, "b", 2).await.unwrap();
-        let ev: Vec<_> = probe.names().into_iter().filter(|n| !n.contains(" c")).collect();
+        let ev: Vec<_> = probe
+            .names()
+            .into_iter()
+            .filter(|n| !n.contains(" c"))
+            .collect();
         assert_eq!(ev, ["load a", "unload", "load b"]);
     }
 
@@ -237,7 +257,10 @@ mod tests {
         let eng = FakeEngine::new(&probe, Duration::ZERO);
         eng.panics.store(usize::MAX, Ordering::SeqCst);
         let h = SttWorker::spawn(Box::new(eng), None);
-        assert!(matches!(one(&h, "a", 3).await, Err(SttError::EngineFailed(_))));
+        assert!(matches!(
+            one(&h, "a", 3).await,
+            Err(SttError::EngineFailed(_))
+        ));
         assert_eq!(probe.count("load"), 2);
         assert_eq!(probe.count("start"), 2);
     }
@@ -255,7 +278,10 @@ mod tests {
         let eng = FakeEngine::new(&probe, Duration::ZERO);
         eng.load_failures.store(2, Ordering::SeqCst);
         let h = SttWorker::spawn(Box::new(eng), None);
-        assert!(matches!(h.preload(fake_model("a")).await, Err(SttError::LoadFailed(_))));
+        assert!(matches!(
+            h.preload(fake_model("a")).await,
+            Err(SttError::LoadFailed(_))
+        ));
         assert_eq!(probe.count("load"), 2);
     }
 }

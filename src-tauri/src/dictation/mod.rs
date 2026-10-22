@@ -9,14 +9,14 @@ pub mod machine;
 mod tests;
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use futures_util::future::BoxFuture;
-use serde_json::{json, Value};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use serde_json::{Value, json};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::audio::{Recorder, RecorderError, RecordingStats};
@@ -27,7 +27,10 @@ use crate::models::{InstalledModel, Manager};
 use crate::postprocess::postprocess;
 use crate::store::{NewTranscript, Store};
 use crate::stt::{Chunk, ChunkPlanner, ChunkerConfig, SttError, SttHandle, SttSession};
-use machine::{step, Effect, Input, State};
+/// Event emitter handed to the controller: `(event name, payload)`.
+pub type EmitFn = Arc<dyn Fn(&str, Value) + Send + Sync>;
+
+use machine::{Effect, Input, State, step};
 
 // ---- ports ----------------------------------------------------------------------------------
 
@@ -52,7 +55,8 @@ impl RecorderPort for Recorder {
 /// One utterance's streaming transcription session.
 pub trait SessionPort: Send {
     fn feed(&self, chunk: Chunk);
-    fn finish(self: Box<Self>, tail: Option<Chunk>) -> BoxFuture<'static, Result<String, SttError>>;
+    fn finish(self: Box<Self>, tail: Option<Chunk>)
+    -> BoxFuture<'static, Result<String, SttError>>;
     fn cancel(self: Box<Self>);
 }
 
@@ -60,7 +64,10 @@ impl SessionPort for SttSession {
     fn feed(&self, chunk: Chunk) {
         SttSession::feed(self, chunk)
     }
-    fn finish(self: Box<Self>, tail: Option<Chunk>) -> BoxFuture<'static, Result<String, SttError>> {
+    fn finish(
+        self: Box<Self>,
+        tail: Option<Chunk>,
+    ) -> BoxFuture<'static, Result<String, SttError>> {
         Box::pin((*self).finish(tail))
     }
     fn cancel(self: Box<Self>) {
@@ -101,7 +108,7 @@ pub struct ControllerDeps {
     pub inserter: Arc<dyn Inserter>,
     pub store: Arc<Store>,
     /// Forwards `(event name, payload)` to the UI (Tauri `emit` in Task 12).
-    pub emit: Arc<dyn Fn(&str, Value) + Send + Sync>,
+    pub emit: EmitFn,
     /// `HotkeyService::set_armed`.
     pub arm_esc: Arc<dyn Fn(bool) + Send + Sync>,
     /// Name of the frontmost app (`insert::frontmost_app_name`), read at key-down.
@@ -135,15 +142,28 @@ enum Msg {
     Hotkey(HotkeyEvent),
     Paused(bool),
     /// An utterance's transcription finished (`Ok(None)`: no speech).
-    Finalized { seq: u64, res: Result<Option<String>, SttError> },
+    Finalized {
+        seq: u64,
+        res: Result<Option<String>, SttError>,
+    },
     /// `Err`: the insert task panicked.
     InsertDone(Result<Option<(String, InsertOutcome)>, String>),
     /// The recorder thread started recording `id`.
-    RecStarted { id: u64 },
-    RecStartFailed { id: u64, err: RecorderError },
-    RecStopped { seq: u64, res: Result<RecordingStats, RecorderError> },
+    RecStarted {
+        id: u64,
+    },
+    RecStartFailed {
+        id: u64,
+        err: RecorderError,
+    },
+    RecStopped {
+        seq: u64,
+        res: Result<RecordingStats, RecorderError>,
+    },
     /// The frame channel of recording `id` closed (normal stop/cancel, or the device was lost).
-    PumpEnded { id: u64 },
+    PumpEnded {
+        id: u64,
+    },
     Shutdown,
 }
 
@@ -160,7 +180,10 @@ fn guarded<T>(f: impl FnOnce() -> Result<T, RecorderError>) -> Result<T, Recorde
         .unwrap_or_else(|_| Err(RecorderError::Other("recorder panicked".into())))
 }
 
-fn spawn_recorder_thread(recorder: Arc<dyn RecorderPort>, tx: UnboundedSender<Msg>) -> Sender<RecCmd> {
+fn spawn_recorder_thread(
+    recorder: Arc<dyn RecorderPort>,
+    tx: UnboundedSender<Msg>,
+) -> Sender<RecCmd> {
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
     std::thread::Builder::new()
         .name("flowlocal-recorder-ctl".into())
@@ -179,7 +202,9 @@ fn spawn_recorder_thread(recorder: Arc<dyn RecorderPort>, tx: UnboundedSender<Ms
                         let _ = tx.send(Msg::RecStopped { seq, res });
                     }
                     RecCmd::Cancel => {
-                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| recorder.cancel()));
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            recorder.cancel()
+                        }));
                     }
                 }
             }
@@ -255,7 +280,7 @@ struct ControllerDeps2 {
     models: Arc<dyn ModelSource>,
     inserter: Arc<dyn Inserter>,
     store: Arc<Store>,
-    emit: Arc<dyn Fn(&str, Value) + Send + Sync>,
+    emit: EmitFn,
     arm_esc: Arc<dyn Fn(bool) + Send + Sync>,
     app_name: Arc<dyn Fn() -> Option<String> + Send + Sync>,
 }
@@ -266,16 +291,18 @@ fn spawn_pump(
     id: u64,
     tx: UnboundedSender<Msg>,
 ) -> std::io::Result<Pump> {
-    std::thread::Builder::new().name("flowlocal-pump".into()).spawn(move || {
-        let mut planner = ChunkPlanner::new(ChunkerConfig::default());
-        while let Ok(frame) = frames.recv() {
-            for chunk in planner.push(&frame) {
-                session.feed(chunk);
+    std::thread::Builder::new()
+        .name("flowlocal-pump".into())
+        .spawn(move || {
+            let mut planner = ChunkPlanner::new(ChunkerConfig::default());
+            while let Ok(frame) = frames.recv() {
+                for chunk in planner.push(&frame) {
+                    session.feed(chunk);
+                }
             }
-        }
-        let _ = tx.send(Msg::PumpEnded { id });
-        (planner, session)
-    })
+            let _ = tx.send(Msg::PumpEnded { id });
+            (planner, session)
+        })
 }
 
 /// Joins the pump off the async threads and cancels its session.
@@ -291,7 +318,18 @@ impl Controller {
     /// Starts the controller. Must be called from within a tokio runtime.
     pub fn spawn(deps: ControllerDeps) -> ControllerHandle {
         let (tx, mut rx) = unbounded_channel();
-        let ControllerDeps { hotkeys, levels, recorder, stt, models, inserter, store, emit, arm_esc, app_name } = deps;
+        let ControllerDeps {
+            hotkeys,
+            levels,
+            recorder,
+            stt,
+            models,
+            inserter,
+            store,
+            emit,
+            arm_esc,
+            app_name,
+        } = deps;
 
         let hk_tx = tx.clone();
         std::thread::spawn(move || {
@@ -318,7 +356,15 @@ impl Controller {
             rec_tx: spawn_recorder_thread(recorder, tx.clone()),
             next_rec_id: 0,
             stopping: HashMap::new(),
-            d: ControllerDeps2 { stt, models, inserter, store, emit, arm_esc, app_name },
+            d: ControllerDeps2 {
+                stt,
+                models,
+                inserter,
+                store,
+                emit,
+                arm_esc,
+                app_name,
+            },
             tx: tx.clone(),
             state: State::Idle,
             last_emitted: None,
@@ -334,7 +380,13 @@ impl Controller {
             let mut tick = tokio::time::interval(TICK_EVERY);
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             loop {
-                let needs_tick = matches!(c.state, State::Recording { hands_free: true, .. } | State::Error { .. });
+                let needs_tick = matches!(
+                    c.state,
+                    State::Recording {
+                        hands_free: true,
+                        ..
+                    } | State::Error { .. }
+                );
                 tokio::select! {
                     msg = rx.recv() => match msg {
                         None | Some(Msg::Shutdown) => break,
@@ -516,28 +568,48 @@ impl Controller {
         let pump = match spawn_pump(frame_rx, session, id, self.tx.clone()) {
             Ok(p) => p,
             Err(e) => {
-                self.queue.push_back(Input::RecorderFailed(RecorderError::Other(e.to_string())));
+                self.queue
+                    .push_back(Input::RecorderFailed(RecorderError::Other(e.to_string())));
                 return;
             }
         };
-        self.active = Some(Active { id, started: false, pump_ended: false, pump, app_name, model_id });
+        self.active = Some(Active {
+            id,
+            started: false,
+            pump_ended: false,
+            pump,
+            app_name,
+            model_id,
+        });
         let _ = self.rec_tx.send(RecCmd::Start { id, frame_tx });
     }
 
     /// Reserves the utterance's place in the queue and asks the recorder thread to stop; the
     /// finalize task starts when `RecStopped` arrives.
     fn stop_recording(&mut self) {
-        let Some(active) = self.active.take() else { return };
+        let Some(active) = self.active.take() else {
+            return;
+        };
         let seq = self.next_seq;
         self.next_seq += 1;
-        let meta = Meta { app_name: active.app_name, model_id: active.model_id, duration_ms: 0 };
-        self.slots.push_back(Slot { seq, meta, res: None });
+        let meta = Meta {
+            app_name: active.app_name,
+            model_id: active.model_id,
+            duration_ms: 0,
+        };
+        self.slots.push_back(Slot {
+            seq,
+            meta,
+            res: None,
+        });
         self.stopping.insert(seq, active.pump);
         let _ = self.rec_tx.send(RecCmd::Stop { seq });
     }
 
     fn recorder_stopped(&mut self, seq: u64, res: Result<RecordingStats, RecorderError>) {
-        let Some(pump) = self.stopping.remove(&seq) else { return };
+        let Some(pump) = self.stopping.remove(&seq) else {
+            return;
+        };
         let stats = match res {
             Ok(stats) => stats,
             Err(e) => {
@@ -566,16 +638,22 @@ impl Controller {
                     Ok(None)
                 }
             });
-            let res = work
-                .await
-                .unwrap_or_else(|_| Err(SttError::EngineFailed("transcription task crashed".into())));
+            let res = work.await.unwrap_or_else(|_| {
+                Err(SttError::EngineFailed("transcription task crashed".into()))
+            });
             let _ = tx.send(Msg::Finalized { seq, res });
         });
     }
 
     fn insert(&mut self, raw: String) {
-        let Some(meta) = self.cur_meta.take() else { return };
-        self.inserting = Some(Job { raw: raw.clone(), meta, text: String::new() });
+        let Some(meta) = self.cur_meta.take() else {
+            return;
+        };
+        self.inserting = Some(Job {
+            raw: raw.clone(),
+            meta,
+            text: String::new(),
+        });
         let inserter = self.d.inserter.clone();
         let store = self.d.store.clone();
         let tx = self.tx.clone();
@@ -602,13 +680,19 @@ impl Controller {
     }
 
     fn persist(&mut self) {
-        let Some(job) = self.inserting.take() else { return };
+        let Some(job) = self.inserting.take() else {
+            return;
+        };
         if job.text.is_empty() {
             return;
         }
         let words = job.text.split_whitespace().count() as i64;
         let duration_ms = job.meta.duration_ms as i64;
-        let wpm = if duration_ms > 0 { words as f64 / (duration_ms as f64 / 60_000.0) } else { 0.0 };
+        let wpm = if duration_ms > 0 {
+            words as f64 / (duration_ms as f64 / 60_000.0)
+        } else {
+            0.0
+        };
         let created_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64);

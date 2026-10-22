@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
 pub trait Keystroke {
@@ -17,7 +17,9 @@ const MODIFIER: Key = Key::Control;
 impl Keystroke for EnigoKeystroke {
     fn paste(&self) -> Result<()> {
         let mut enigo = Enigo::new(&Settings::default()).map_err(|e| anyhow!("enigo init: {e}"))?;
-        enigo.key(MODIFIER, Direction::Press).map_err(|e| anyhow!("modifier press: {e}"))?;
+        enigo
+            .key(MODIFIER, Direction::Press)
+            .map_err(|e| anyhow!("modifier press: {e}"))?;
         let clicked = enigo.key(Key::Unicode('v'), Direction::Click);
         // Always release the modifier, even if the V click failed.
         let released = enigo.key(MODIFIER, Direction::Release);

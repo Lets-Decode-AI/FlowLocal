@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use flowlocal_lib::audio::{FRAME_LEN, SAMPLE_RATE};
-use flowlocal_lib::models::catalog::CatalogEntry;
 use flowlocal_lib::models::InstalledModel;
+use flowlocal_lib::models::catalog::CatalogEntry;
 use flowlocal_lib::stt::{Chunk, ChunkPlanner, ChunkerConfig, SherpaEngine, SttHandle, SttWorker};
 
 fn model() -> Option<InstalledModel> {
@@ -31,7 +31,10 @@ fn fixtures() -> Vec<(String, Vec<f32>, String)> {
         .map(|(name, text)| {
             let mut r = hound::WavReader::open(dir.join(&name)).unwrap();
             assert_eq!(r.spec().sample_rate, SAMPLE_RATE);
-            let samples = r.samples::<i16>().map(|s| s.unwrap() as f32 / 32768.0).collect();
+            let samples = r
+                .samples::<i16>()
+                .map(|s| s.unwrap() as f32 / 32768.0)
+                .collect();
             (name, samples, text)
         })
         .collect()
@@ -40,7 +43,11 @@ fn fixtures() -> Vec<(String, Vec<f32>, String)> {
 fn words(s: &str) -> Vec<String> {
     s.to_lowercase()
         .split_whitespace()
-        .map(|w| w.chars().filter(|c| c.is_alphanumeric() || *c == '\'').collect::<String>())
+        .map(|w| {
+            w.chars()
+                .filter(|c| c.is_alphanumeric() || *c == '\'')
+                .collect::<String>()
+        })
         .filter(|w| !w.is_empty())
         .collect()
 }
@@ -60,11 +67,19 @@ fn wer(reference: &str, hypothesis: &str) -> f32 {
     prev[h.len()] as f32 / r.len() as f32
 }
 
-async fn transcribe_whole(h: &SttHandle, m: &InstalledModel, samples: &[f32]) -> (String, Duration) {
+async fn transcribe_whole(
+    h: &SttHandle,
+    m: &InstalledModel,
+    samples: &[f32],
+) -> (String, Duration) {
     let s = h.session(m.clone());
     let t = Instant::now();
     let text = s
-        .finish(Some(Chunk { samples: samples.to_vec(), has_speech: true, start_ms: 0 }))
+        .finish(Some(Chunk {
+            samples: samples.to_vec(),
+            has_speech: true,
+            start_ms: 0,
+        }))
         .await
         .expect("transcribe");
     (text, t.elapsed())
@@ -79,7 +94,9 @@ fn wer_helper_sanity() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs FLOWLOCAL_MODEL_DIR (see scripts/fetch_test_model.sh)"]
 async fn parakeet_wer_below_threshold() {
-    let Some(m) = model() else { return eprintln!("FLOWLOCAL_MODEL_DIR not set; skipping") };
+    let Some(m) = model() else {
+        return eprintln!("FLOWLOCAL_MODEL_DIR not set; skipping");
+    };
     let h = SttWorker::spawn(Box::new(SherpaEngine::new()), None);
     let t = Instant::now();
     h.preload(m.clone()).await.expect("load model");
@@ -92,7 +109,10 @@ async fn parakeet_wer_below_threshold() {
     for (name, samples, expected) in &files {
         let (text, took) = transcribe_whole(&h, &m, samples).await;
         let w = wer(expected, &text);
-        eprintln!("{name}: {:.1}s audio, {took:?}, WER {w:.3}\n  -> {text}", samples.len() as f32 / 16000.0);
+        eprintln!(
+            "{name}: {:.1}s audio, {took:?}, WER {w:.3}\n  -> {text}",
+            samples.len() as f32 / 16000.0
+        );
         worst = worst.max(w);
         assert!(w < 0.08, "{name}: WER {w}");
         if name == "s0.wav" {
@@ -109,7 +129,9 @@ async fn parakeet_wer_below_threshold() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs FLOWLOCAL_MODEL_DIR (see scripts/fetch_test_model.sh)"]
 async fn streaming_60s_finish_under_1s() {
-    let Some(m) = model() else { return eprintln!("FLOWLOCAL_MODEL_DIR not set; skipping") };
+    let Some(m) = model() else {
+        return eprintln!("FLOWLOCAL_MODEL_DIR not set; skipping");
+    };
     let h = SttWorker::spawn(Box::new(SherpaEngine::new()), None);
     h.preload(m.clone()).await.expect("load model");
     let files = fixtures();
@@ -141,7 +163,9 @@ async fn streaming_60s_finish_under_1s() {
     }
     let key_up = Instant::now();
     let tail = planner.finish();
-    let tail_secs = tail.as_ref().map_or(0.0, |t| t.samples.len() as f32 / 16000.0);
+    let tail_secs = tail
+        .as_ref()
+        .map_or(0.0, |t| t.samples.len() as f32 / 16000.0);
     let text = session.finish(tail).await.expect("finish");
     let latency = key_up.elapsed();
 

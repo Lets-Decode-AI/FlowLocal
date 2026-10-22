@@ -80,15 +80,25 @@ pub enum Effect {
 }
 
 fn recording(now: Instant, hands_free: bool) -> State {
-    State::Recording { started: now, hands_free }
+    State::Recording {
+        started: now,
+        hands_free,
+    }
 }
 
 fn error(message: String, now: Instant) -> State {
-    State::Error { message, since: now }
+    State::Error {
+        message,
+        since: now,
+    }
 }
 
 fn stop_effects() -> Vec<Effect> {
-    vec![Effect::StopRecording, Effect::ArmEsc(false), Effect::Transcribe]
+    vec![
+        Effect::StopRecording,
+        Effect::ArmEsc(false),
+        Effect::Transcribe,
+    ]
 }
 
 /// Appends `Emit(new)` when the state changed.
@@ -102,49 +112,78 @@ fn finish(old: &State, new: State, mut fx: Vec<Effect>) -> (State, Vec<Effect>) 
 pub fn step(state: State, input: Input, now: Instant) -> (State, Vec<Effect>) {
     let old = state.clone();
     match (state, input) {
-        (State::Recording { hands_free: true, .. }, Input::Hotkey(HotkeyEvent::Pressed)) => {
-            finish(&old, State::Transcribing, stop_effects())
-        }
+        (
+            State::Recording {
+                hands_free: true, ..
+            },
+            Input::Hotkey(HotkeyEvent::Pressed),
+        ) => finish(&old, State::Transcribing, stop_effects()),
         (State::Recording { .. }, Input::Hotkey(HotkeyEvent::Pressed)) => (old, vec![]),
-        (_, Input::Hotkey(HotkeyEvent::Pressed)) => {
-            finish(&old, recording(now, false), vec![Effect::StartRecording, Effect::ArmEsc(true)])
-        }
+        (_, Input::Hotkey(HotkeyEvent::Pressed)) => finish(
+            &old,
+            recording(now, false),
+            vec![Effect::StartRecording, Effect::ArmEsc(true)],
+        ),
 
         (State::Recording { started, .. }, Input::Hotkey(HotkeyEvent::DoubleTap)) => {
             finish(&old, recording(started, true), vec![])
         }
-        (_, Input::Hotkey(HotkeyEvent::DoubleTap)) => {
-            finish(&old, recording(now, true), vec![Effect::StartRecording, Effect::ArmEsc(true)])
-        }
+        (_, Input::Hotkey(HotkeyEvent::DoubleTap)) => finish(
+            &old,
+            recording(now, true),
+            vec![Effect::StartRecording, Effect::ArmEsc(true)],
+        ),
 
-        (State::Recording { started, hands_free: false }, Input::Hotkey(HotkeyEvent::Released)) => {
+        (
+            State::Recording {
+                started,
+                hands_free: false,
+            },
+            Input::Hotkey(HotkeyEvent::Released),
+        ) => {
             if now.saturating_duration_since(started) < MIN_HOLD {
-                finish(&old, State::Idle, vec![Effect::CancelRecording, Effect::ArmEsc(false)])
+                finish(
+                    &old,
+                    State::Idle,
+                    vec![Effect::CancelRecording, Effect::ArmEsc(false)],
+                )
             } else {
                 finish(&old, State::Transcribing, stop_effects())
             }
         }
 
-        (State::Recording { .. }, Input::Hotkey(HotkeyEvent::Cancel)) => {
-            finish(&old, State::Idle, vec![Effect::CancelRecording, Effect::ArmEsc(false)])
-        }
+        (State::Recording { .. }, Input::Hotkey(HotkeyEvent::Cancel)) => finish(
+            &old,
+            State::Idle,
+            vec![Effect::CancelRecording, Effect::ArmEsc(false)],
+        ),
 
-        (State::Recording { started, hands_free: true }, Input::Tick)
-            if now.saturating_duration_since(started) >= HANDS_FREE_MAX =>
-        {
+        (
+            State::Recording {
+                started,
+                hands_free: true,
+            },
+            Input::Tick,
+        ) if now.saturating_duration_since(started) >= HANDS_FREE_MAX => {
             finish(&old, State::Transcribing, stop_effects())
         }
-        (State::Error { since, .. }, Input::Tick) if now.saturating_duration_since(since) >= ERROR_SHOWN_FOR => {
+        (State::Error { since, .. }, Input::Tick)
+            if now.saturating_duration_since(since) >= ERROR_SHOWN_FOR =>
+        {
             finish(&old, State::Idle, vec![])
         }
 
-        (State::Recording { .. }, Input::RecorderFailed(e)) => {
-            finish(&old, error(e.to_string(), now), vec![Effect::CancelRecording, Effect::ArmEsc(false)])
-        }
+        (State::Recording { .. }, Input::RecorderFailed(e)) => finish(
+            &old,
+            error(e.to_string(), now),
+            vec![Effect::CancelRecording, Effect::ArmEsc(false)],
+        ),
         (_, Input::RecorderFailed(e)) => finish(&old, error(e.to_string(), now), vec![]),
-        (State::Recording { .. }, Input::NoModel) => {
-            finish(&old, error("No model installed".into(), now), vec![Effect::CancelRecording, Effect::ArmEsc(false)])
-        }
+        (State::Recording { .. }, Input::NoModel) => finish(
+            &old,
+            error("No model installed".into(), now),
+            vec![Effect::CancelRecording, Effect::ArmEsc(false)],
+        ),
         (_, Input::NoModel) => finish(&old, error("No model installed".into(), now), vec![]),
 
         (State::Recording { .. }, Input::Transcribed(Ok(text))) if !text.trim().is_empty() => {
@@ -155,7 +194,9 @@ pub fn step(state: State, input: Input, now: Instant) -> (State, Vec<Effect>) {
         }
         (State::Recording { .. }, Input::Transcribed(Ok(_))) => (old, vec![]),
         (_, Input::Transcribed(Ok(_))) => finish(&old, State::Idle, vec![]),
-        (State::Recording { .. }, Input::Transcribed(Err(e))) => (old, vec![Effect::ShowError(e.to_string())]),
+        (State::Recording { .. }, Input::Transcribed(Err(e))) => {
+            (old, vec![Effect::ShowError(e.to_string())])
+        }
         (_, Input::Transcribed(Err(e))) => finish(&old, error(e.to_string(), now), vec![]),
 
         (State::Recording { .. }, Input::Failed(msg)) => (old, vec![Effect::ShowError(msg)]),
@@ -179,7 +220,10 @@ mod tests {
     use tokio::time::Instant;
 
     fn rec(t: Instant, hands_free: bool) -> State {
-        State::Recording { started: t, hands_free }
+        State::Recording {
+            started: t,
+            hands_free,
+        }
     }
     fn has(effects: &[Effect], e: &Effect) -> bool {
         effects.contains(e)
@@ -190,7 +234,14 @@ mod tests {
         let t = Instant::now();
         let (s, fx) = step(State::Idle, Input::Hotkey(H::Pressed), t);
         assert_eq!(s, rec(t, false));
-        assert_eq!(fx, vec![Effect::StartRecording, Effect::ArmEsc(true), Effect::Emit(s.clone())]);
+        assert_eq!(
+            fx,
+            vec![
+                Effect::StartRecording,
+                Effect::ArmEsc(true),
+                Effect::Emit(s.clone())
+            ]
+        );
     }
 
     #[test]
@@ -206,7 +257,11 @@ mod tests {
     #[test]
     fn short_release_cancels() {
         let t = Instant::now();
-        let (s, fx) = step(rec(t, false), Input::Hotkey(H::Released), t + Duration::from_millis(249));
+        let (s, fx) = step(
+            rec(t, false),
+            Input::Hotkey(H::Released),
+            t + Duration::from_millis(249),
+        );
         assert_eq!(s, State::Idle);
         assert!(has(&fx, &Effect::CancelRecording) && has(&fx, &Effect::ArmEsc(false)));
         assert!(!has(&fx, &Effect::Transcribe));
@@ -215,11 +270,20 @@ mod tests {
     #[test]
     fn long_release_stops_and_transcribes() {
         let t = Instant::now();
-        let (s, fx) = step(rec(t, false), Input::Hotkey(H::Released), t + Duration::from_millis(250));
+        let (s, fx) = step(
+            rec(t, false),
+            Input::Hotkey(H::Released),
+            t + Duration::from_millis(250),
+        );
         assert_eq!(s, State::Transcribing);
         assert_eq!(
             fx,
-            vec![Effect::StopRecording, Effect::ArmEsc(false), Effect::Transcribe, Effect::Emit(State::Transcribing)]
+            vec![
+                Effect::StopRecording,
+                Effect::ArmEsc(false),
+                Effect::Transcribe,
+                Effect::Emit(State::Transcribing)
+            ]
         );
     }
 
@@ -229,7 +293,11 @@ mod tests {
         let (s, _) = step(State::Idle, Input::Hotkey(H::DoubleTap), t);
         assert_eq!(s, rec(t, true));
         // release of a hands-free recording is ignored
-        let (s2, fx) = step(s.clone(), Input::Hotkey(H::Released), t + Duration::from_secs(5));
+        let (s2, fx) = step(
+            s.clone(),
+            Input::Hotkey(H::Released),
+            t + Duration::from_secs(5),
+        );
         assert_eq!((s2.clone(), fx.len()), (s, 0));
         let (s3, fx) = step(s2, Input::Hotkey(H::Pressed), t + Duration::from_secs(6));
         assert_eq!(s3, State::Transcribing);
@@ -263,7 +331,13 @@ mod tests {
     fn error_expires_after_two_seconds_on_tick() {
         let t = Instant::now();
         let (s, _) = step(State::Idle, Input::NoModel, t);
-        assert_eq!(s, State::Error { message: "No model installed".into(), since: t });
+        assert_eq!(
+            s,
+            State::Error {
+                message: "No model installed".into(),
+                since: t
+            }
+        );
         let (s, _) = step(s, Input::Tick, t + Duration::from_millis(1999));
         assert!(matches!(s, State::Error { .. }));
         let (s, fx) = step(s, Input::Tick, t + Duration::from_secs(2));
@@ -274,8 +348,18 @@ mod tests {
     #[test]
     fn recorder_failure_goes_to_error() {
         let t = Instant::now();
-        let (s, fx) = step(rec(t, false), Input::RecorderFailed(crate::audio::RecorderError::DeviceLost), t);
-        assert_eq!(s, State::Error { message: "input device was lost".into(), since: t });
+        let (s, fx) = step(
+            rec(t, false),
+            Input::RecorderFailed(crate::audio::RecorderError::DeviceLost),
+            t,
+        );
+        assert_eq!(
+            s,
+            State::Error {
+                message: "input device was lost".into(),
+                since: t
+            }
+        );
         assert!(has(&fx, &Effect::CancelRecording) && has(&fx, &Effect::ArmEsc(false)));
     }
 
@@ -319,11 +403,23 @@ mod tests {
         let t = Instant::now();
         let j = |s: State| serde_json::to_value(s).unwrap();
         assert_eq!(j(State::Idle), serde_json::json!({"kind": "idle"}));
-        assert_eq!(j(rec(t, true)), serde_json::json!({"kind": "recording", "handsFree": true}));
-        assert_eq!(j(State::Transcribing), serde_json::json!({"kind": "transcribing"}));
-        assert_eq!(j(State::Inserting), serde_json::json!({"kind": "inserting"}));
         assert_eq!(
-            j(State::Error { message: "x".into(), since: t }),
+            j(rec(t, true)),
+            serde_json::json!({"kind": "recording", "handsFree": true})
+        );
+        assert_eq!(
+            j(State::Transcribing),
+            serde_json::json!({"kind": "transcribing"})
+        );
+        assert_eq!(
+            j(State::Inserting),
+            serde_json::json!({"kind": "inserting"})
+        );
+        assert_eq!(
+            j(State::Error {
+                message: "x".into(),
+                since: t
+            }),
             serde_json::json!({"kind": "error", "message": "x"})
         );
     }

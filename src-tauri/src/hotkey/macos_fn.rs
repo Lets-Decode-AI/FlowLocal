@@ -47,7 +47,10 @@ fn from_flags_changed(keycode: i64, flags: u64) -> Option<(Key, bool)> {
 /// Down-state of every modifier (and Fn) according to `flags`. Applied on
 /// each flagsChanged so a missed key-up cannot leave a modifier stuck.
 fn modifier_states(flags: u64) -> Vec<(Key, bool)> {
-    let mut v: Vec<_> = MODIFIERS.iter().map(|(_, bit, key)| (*key, flags & bit != 0)).collect();
+    let mut v: Vec<_> = MODIFIERS
+        .iter()
+        .map(|(_, bit, key)| (*key, flags & bit != 0))
+        .collect();
     v.push((Key::Fn, flags & FLAG_SECONDARY_FN != 0));
     v
 }
@@ -71,14 +74,22 @@ pub fn start(core: Arc<Mutex<Core>>, stopped: Arc<AtomicBool>) -> Result<(), Hot
         .unwrap_or_else(|_| Err(HotkeyError::Backend("hotkey thread died".into())))
 }
 
-fn run(core: Arc<Mutex<Core>>, stopped: Arc<AtomicBool>, ready: mpsc::Sender<Result<(), HotkeyError>>) {
+fn run(
+    core: Arc<Mutex<Core>>,
+    stopped: Arc<AtomicBool>,
+    ready: mpsc::Sender<Result<(), HotkeyError>>,
+) {
     let cb_core = core.clone();
     let cb_stopped = stopped.clone();
     let tap = CGEventTap::new(
         CGEventTapLocation::Session,
         CGEventTapPlacement::HeadInsertEventTap,
         CGEventTapOptions::ListenOnly,
-        vec![CGEventType::FlagsChanged, CGEventType::KeyDown, CGEventType::KeyUp],
+        vec![
+            CGEventType::FlagsChanged,
+            CGEventType::KeyDown,
+            CGEventType::KeyUp,
+        ],
         move |_proxy, etype, event| {
             if cb_stopped.load(Ordering::Relaxed) {
                 return CallbackResult::Keep;
@@ -120,7 +131,11 @@ fn run(core: Arc<Mutex<Core>>, stopped: Arc<AtomicBool>, ready: mpsc::Sender<Res
     let _ = ready.send(Ok(()));
 
     while !stopped.load(Ordering::Relaxed) {
-        CFRunLoop::run_in_mode(unsafe { kCFRunLoopDefaultMode }, Duration::from_millis(250), false);
+        CFRunLoop::run_in_mode(
+            unsafe { kCFRunLoopDefaultMode },
+            Duration::from_millis(250),
+            false,
+        );
         // Cheap and idempotent; recovers a tap the system disabled.
         tap.enable();
     }
@@ -132,7 +147,10 @@ mod tests {
 
     #[test]
     fn fn_flag_maps_to_fn_key() {
-        assert_eq!(from_flags_changed(63, FLAG_SECONDARY_FN), Some((Key::Fn, true)));
+        assert_eq!(
+            from_flags_changed(63, FLAG_SECONDARY_FN),
+            Some((Key::Fn, true))
+        );
         assert_eq!(from_flags_changed(63, 0), Some((Key::Fn, false)));
     }
 

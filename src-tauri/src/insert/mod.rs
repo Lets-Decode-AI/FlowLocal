@@ -112,7 +112,7 @@ mod tests {
     use super::clipboard::{Clipboard, ClipboardSnapshot};
     use super::keystroke::Keystroke;
     use super::*;
-    use anyhow::{anyhow, Result};
+    use anyhow::{Result, anyhow};
     use arboard::ImageData;
     use std::borrow::Cow;
     use std::sync::{Arc, Mutex};
@@ -165,11 +165,21 @@ mod tests {
         }
     }
 
-    fn rig(initial: ClipboardSnapshot, fail: bool, secure: bool) -> (ClipboardInserter<FakeClipboard, FakeKeys>, Arc<Mutex<State>>) {
+    fn rig(
+        initial: ClipboardSnapshot,
+        fail: bool,
+        secure: bool,
+    ) -> (
+        ClipboardInserter<FakeClipboard, FakeKeys>,
+        Arc<Mutex<State>>,
+    ) {
         let cb = FakeClipboard::default();
         cb.0.lock().unwrap().content = initial;
         let state = cb.0.clone();
-        let keys = FakeKeys { state: state.clone(), fail };
+        let keys = FakeKeys {
+            state: state.clone(),
+            fail,
+        };
         let ins = ClipboardInserter::new(cb, keys)
             .with_restore_delay(Duration::ZERO)
             .with_secure_input(move || secure);
@@ -177,7 +187,11 @@ mod tests {
     }
 
     fn img() -> ImageData<'static> {
-        ImageData { width: 1, height: 1, bytes: Cow::Owned(vec![1, 2, 3, 4]) }
+        ImageData {
+            width: 1,
+            height: 1,
+            bytes: Cow::Owned(vec![1, 2, 3, 4]),
+        }
     }
 
     #[test]
@@ -197,7 +211,10 @@ mod tests {
         let st = st.lock().unwrap();
         match &st.restored[..] {
             [ClipboardSnapshot::Image(i)] => {
-                assert_eq!((i.width, i.height, i.bytes.to_vec()), (1, 1, vec![1, 2, 3, 4]))
+                assert_eq!(
+                    (i.width, i.height, i.bytes.to_vec()),
+                    (1, 1, vec![1, 2, 3, 4])
+                )
             }
             other => panic!("unexpected restore: {} entries", other.len()),
         }

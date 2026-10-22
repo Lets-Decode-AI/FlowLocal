@@ -4,11 +4,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use super::SttEngine;
-use crate::models::catalog::{CatalogEntry, EngineKind};
 use crate::models::InstalledModel;
+use crate::models::catalog::{CatalogEntry, EngineKind};
 
 /// Event log shared between a fake engine and its test.
 #[derive(Clone, Default)]
@@ -21,13 +21,26 @@ impl Probe {
         self.events.lock().unwrap().push((s.into(), Instant::now()));
     }
     pub fn names(&self) -> Vec<String> {
-        self.events.lock().unwrap().iter().map(|e| e.0.clone()).collect()
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|e| e.0.clone())
+            .collect()
     }
     pub fn count(&self, prefix: &str) -> usize {
-        self.names().iter().filter(|n| n.starts_with(prefix)).count()
+        self.names()
+            .iter()
+            .filter(|n| n.starts_with(prefix))
+            .count()
     }
     pub fn time_of(&self, name: &str) -> Option<Instant> {
-        self.events.lock().unwrap().iter().find(|e| e.0 == name).map(|e| e.1)
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|e| e.0 == name)
+            .map(|e| e.1)
     }
 }
 
@@ -43,7 +56,13 @@ pub struct FakeEngine {
 
 impl FakeEngine {
     pub fn new(probe: &Probe, delay: Duration) -> Self {
-        Self { probe: probe.clone(), delay, panics: Arc::default(), load_failures: Arc::default(), loaded: None }
+        Self {
+            probe: probe.clone(),
+            delay,
+            panics: Arc::default(),
+            load_failures: Arc::default(),
+            loaded: None,
+        }
     }
 }
 
@@ -105,5 +124,9 @@ pub fn fake_model(id: &str) -> InstalledModel {
 
 /// A chunk whose "audio" is `[id; 160]`, so the fake engine answers `c<id>`.
 pub fn speech_chunk(id: usize) -> super::Chunk {
-    super::Chunk { samples: vec![id as f32; 160], has_speech: true, start_ms: 0 }
+    super::Chunk {
+        samples: vec![id as f32; 160],
+        has_speech: true,
+        start_ms: 0,
+    }
 }

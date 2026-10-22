@@ -61,7 +61,11 @@ struct RawLfs {
 
 impl HfClient {
     pub fn new(token: Option<String>) -> Self {
-        Self { base: DEFAULT_BASE.to_string(), token: std::sync::Arc::new(std::sync::RwLock::new(token)), http: reqwest::Client::new() }
+        Self {
+            base: DEFAULT_BASE.to_string(),
+            token: std::sync::Arc::new(std::sync::RwLock::new(token)),
+            http: reqwest::Client::new(),
+        }
     }
 
     /// Replace the bearer token; shared by every clone of this client.
@@ -139,7 +143,10 @@ impl HfClient {
 
     pub async fn inspect(&self, repo: &str) -> Result<Inspection> {
         let raw: RawRepo = self
-            .get(&format!("{}/api/models/{}", self.base, repo), &[("blobs", "true")])?
+            .get(
+                &format!("{}/api/models/{}", self.base, repo),
+                &[("blobs", "true")],
+            )?
             .send()
             .await
             .context("hugging face repo request failed")?
@@ -209,7 +216,10 @@ pub fn detect_engine(files: &[String], repo: &str) -> Option<(EngineKind, Vec<St
         find(&|f| onnx(f) && f.starts_with("joiner")),
         find(&|f| f == "tokens.txt"),
     ) {
-        return Some((EngineKind::Transducer, vec![e.clone(), d.clone(), j.clone(), t.clone()]));
+        return Some((
+            EngineKind::Transducer,
+            vec![e.clone(), d.clone(), j.clone(), t.clone()],
+        ));
     }
     // Whisper
     if let (Some(e), Some(d), Some(t)) = (
@@ -234,13 +244,13 @@ pub fn detect_engine(files: &[String], repo: &str) -> Option<(EngineKind, Vec<St
     }
     // SenseVoice
     let lower = repo.to_lowercase();
-    if lower.contains("sense-voice") || lower.contains("sensevoice") {
-        if let (Some(m), Some(t)) = (
+    if (lower.contains("sense-voice") || lower.contains("sensevoice"))
+        && let (Some(m), Some(t)) = (
             find(&|f| onnx(f) && f.starts_with("model")),
             find(&|f| f == "tokens.txt"),
-        ) {
-            return Some((EngineKind::SenseVoice, vec![m.clone(), t.clone()]));
-        }
+        )
+    {
+        return Some((EngineKind::SenseVoice, vec![m.clone(), t.clone()]));
     }
     None
 }
@@ -257,38 +267,73 @@ mod tests {
 
     #[test]
     fn detects_parakeet_transducer() {
-        let files = s(&["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt", "encoder.onnx"]);
+        let files = s(&[
+            "encoder.int8.onnx",
+            "decoder.int8.onnx",
+            "joiner.int8.onnx",
+            "tokens.txt",
+            "encoder.onnx",
+        ]);
         let (kind, mut chosen) = detect_engine(&files, "x/parakeet").unwrap();
         chosen.sort();
         assert_eq!(kind, EngineKind::Transducer);
-        assert_eq!(chosen, s(&["decoder.int8.onnx", "encoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]));
+        assert_eq!(
+            chosen,
+            s(&[
+                "decoder.int8.onnx",
+                "encoder.int8.onnx",
+                "joiner.int8.onnx",
+                "tokens.txt"
+            ])
+        );
     }
 
     #[test]
     fn detects_whisper() {
         let files = s(&[
-            "tiny.en-encoder.onnx", "tiny.en-encoder.int8.onnx", "tiny.en-decoder.onnx",
-            "tiny.en-decoder.int8.onnx", "tiny.en-tokens.txt", "test_wavs/0.wav",
+            "tiny.en-encoder.onnx",
+            "tiny.en-encoder.int8.onnx",
+            "tiny.en-decoder.onnx",
+            "tiny.en-decoder.int8.onnx",
+            "tiny.en-tokens.txt",
+            "test_wavs/0.wav",
         ]);
         let (kind, mut chosen) = detect_engine(&files, "x/whisper").unwrap();
         chosen.sort();
         assert_eq!(kind, EngineKind::Whisper);
-        assert_eq!(chosen, s(&["tiny.en-decoder.int8.onnx", "tiny.en-encoder.int8.onnx", "tiny.en-tokens.txt"]));
+        assert_eq!(
+            chosen,
+            s(&[
+                "tiny.en-decoder.int8.onnx",
+                "tiny.en-encoder.int8.onnx",
+                "tiny.en-tokens.txt"
+            ])
+        );
     }
 
     #[test]
     fn detects_moonshine() {
         let files = s(&[
-            "preprocess.onnx", "encode.int8.onnx", "uncached_decode.int8.onnx",
-            "cached_decode.int8.onnx", "tokens.txt", "cached_decode.onnx",
+            "preprocess.onnx",
+            "encode.int8.onnx",
+            "uncached_decode.int8.onnx",
+            "cached_decode.int8.onnx",
+            "tokens.txt",
+            "cached_decode.onnx",
         ]);
         let (kind, mut chosen) = detect_engine(&files, "x/moonshine").unwrap();
         chosen.sort();
         assert_eq!(kind, EngineKind::Moonshine);
-        assert_eq!(chosen, s(&[
-            "cached_decode.int8.onnx", "encode.int8.onnx", "preprocess.onnx",
-            "tokens.txt", "uncached_decode.int8.onnx",
-        ]));
+        assert_eq!(
+            chosen,
+            s(&[
+                "cached_decode.int8.onnx",
+                "encode.int8.onnx",
+                "preprocess.onnx",
+                "tokens.txt",
+                "uncached_decode.int8.onnx",
+            ])
+        );
     }
 
     #[test]
@@ -309,10 +354,13 @@ mod tests {
     #[tokio::test]
     async fn search_falls_back_without_filter() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/api/models"))
+        Mock::given(method("GET"))
+            .and(path("/api/models"))
             .and(query_param("filter", "sherpa-onnx"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
-            .expect(1).mount(&server).await;
+            .expect(1)
+            .mount(&server)
+            .await;
         Mock::given(method("GET")).and(path("/api/models"))
             .and(query_param("search", "whisper")).and(query_param_is_missing("filter"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
@@ -320,7 +368,11 @@ mod tests {
                 {"id": "a/bare"}
             ])))
             .expect(1).mount(&server).await;
-        let out = HfClient::new(None).with_base(&server.uri()).search("whisper").await.unwrap();
+        let out = HfClient::new(None)
+            .with_base(&server.uri())
+            .search("whisper")
+            .await
+            .unwrap();
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].repo, "a/whisper-x");
         assert_eq!(out[0].downloads, 5);
@@ -345,12 +397,18 @@ mod tests {
     #[tokio::test]
     async fn inspect_builds_entry_with_sha_from_lfs() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/api/models/own/my-model"))
-            .and(query_param("blobs", "true")).and(header("authorization", "Bearer tok"))
+        Mock::given(method("GET"))
+            .and(path("/api/models/own/my-model"))
+            .and(query_param("blobs", "true"))
+            .and(header("authorization", "Bearer tok"))
             .respond_with(ResponseTemplate::new(200).set_body_json(repo_json()))
-            .expect(1).mount(&server).await;
+            .expect(1)
+            .mount(&server)
+            .await;
         let c = HfClient::new(Some("tok".into())).with_base(&server.uri());
-        let Inspection::Compatible(e) = c.inspect("own/my-model").await.unwrap() else { panic!("incompatible") };
+        let Inspection::Compatible(e) = c.inspect("own/my-model").await.unwrap() else {
+            panic!("incompatible")
+        };
         assert_eq!(e.id, "hf:own/my-model");
         assert_eq!(e.name, "my-model");
         assert_eq!(e.hf_repo, "own/my-model");
@@ -359,7 +417,11 @@ mod tests {
         assert_eq!(e.notes, "From Hugging Face");
         assert!(e.languages.is_empty());
         assert_eq!(e.min_ram_gb, 4); // ceil(1.6e9 * 2 / 1e9) = 4
-        let enc = e.files.iter().find(|f| f.path == "encoder.int8.onnx").unwrap();
+        let enc = e
+            .files
+            .iter()
+            .find(|f| f.path == "encoder.int8.onnx")
+            .unwrap();
         assert_eq!((enc.size, enc.sha256.as_str()), (1_000_000_000, "aa"));
         let tok = e.files.iter().find(|f| f.path == "tokens.txt").unwrap();
         assert_eq!((tok.size, tok.sha256.as_str()), (10, ""));
@@ -369,11 +431,18 @@ mod tests {
     #[tokio::test]
     async fn inspect_incompatible_for_unknown_repo() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/api/models/o/bin"))
+        Mock::given(method("GET"))
+            .and(path("/api/models/o/bin"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "sha": "z", "siblings": [{"rfilename": "pytorch_model.bin", "size": 1}]
-            }))).mount(&server).await;
-        let r = HfClient::new(None).with_base(&server.uri()).inspect("o/bin").await.unwrap();
+            })))
+            .mount(&server)
+            .await;
+        let r = HfClient::new(None)
+            .with_base(&server.uri())
+            .inspect("o/bin")
+            .await
+            .unwrap();
         assert!(matches!(r, Inspection::Incompatible { .. }));
     }
 }

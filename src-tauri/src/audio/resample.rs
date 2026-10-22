@@ -32,8 +32,14 @@ impl StreamResampler {
             None
         } else {
             let chunk = (rate as usize / 50).max(64);
-            let r = Fft::<f32>::new(rate as usize, SAMPLE_RATE as usize, chunk, 1, FixedSync::Input)
-                .map_err(|e| RecorderError::Other(format!("resampler setup failed: {e}")))?;
+            let r = Fft::<f32>::new(
+                rate as usize,
+                SAMPLE_RATE as usize,
+                chunk,
+                1,
+                FixedSync::Input,
+            )
+            .map_err(|e| RecorderError::Other(format!("resampler setup failed: {e}")))?;
             Some(r)
         };
         let (skip, out_buf) = match &rs {
@@ -69,8 +75,14 @@ impl StreamResampler {
 
     /// Run one resampler chunk; `partial` = number of valid frames when padding.
     /// Input is only consumed when processing succeeds.
-    fn run_chunk(&mut self, partial: Option<usize>, out: &mut Vec<f32>) -> Result<(), RecorderError> {
-        let Some(rs) = self.rs.as_mut() else { return Ok(()) };
+    fn run_chunk(
+        &mut self,
+        partial: Option<usize>,
+        out: &mut Vec<f32>,
+    ) -> Result<(), RecorderError> {
+        let Some(rs) = self.rs.as_mut() else {
+            return Ok(());
+        };
         let need = rs.input_frames_next();
         let mut chunk = vec![0.0f32; need];
         let take = partial.unwrap_or(need).min(self.pending.len());
@@ -84,7 +96,8 @@ impl StreamResampler {
         let (_, n_out) = rs
             .process_into_buffer(&input, &mut output, indexing.as_ref())
             .map_err(|e| RecorderError::Other(format!("resampling failed: {e}")))?;
-        self.pending.drain(..if partial.is_some() { take } else { need });
+        self.pending
+            .drain(..if partial.is_some() { take } else { need });
         let start = self.skip.min(n_out);
         self.skip -= start;
         out.extend_from_slice(&self.out_buf[start..n_out]);
@@ -100,7 +113,11 @@ impl StreamResampler {
         self.in_total += mono.len() as u64;
         self.pending.extend_from_slice(&mono);
         let mut out = Vec::new();
-        while self.rs.as_ref().is_some_and(|r| self.pending.len() >= r.input_frames_next()) {
+        while self
+            .rs
+            .as_ref()
+            .is_some_and(|r| self.pending.len() >= r.input_frames_next())
+        {
             if let Err(e) = self.run_chunk(None, &mut out) {
                 self.out_total += out.len() as u64;
                 return Err(e);
@@ -122,7 +139,8 @@ impl StreamResampler {
         if self.rs.is_none() {
             return Ok(());
         }
-        let expected = (self.in_total as f64 * SAMPLE_RATE as f64 / self.rate as f64).round() as u64;
+        let expected =
+            (self.in_total as f64 * SAMPLE_RATE as f64 / self.rate as f64).round() as u64;
         if !self.pending.is_empty() {
             let n = self.pending.len();
             self.run_chunk(Some(n), out)?;
@@ -212,14 +230,27 @@ mod tests {
         let batch = to_mono_16k(&input, 1, 48_000);
         let mut r = StreamResampler::new(1, 48_000).unwrap();
         let mut out = Vec::new();
-        let cuts = [0usize, 1000, 5000, 5001, 20_000, 31_337, 40_000, input.len()];
+        let cuts = [
+            0usize,
+            1000,
+            5000,
+            5001,
+            20_000,
+            31_337,
+            40_000,
+            input.len(),
+        ];
         for w in cuts.windows(2) {
             out.extend(r.process(&input[w[0]..w[1]]).unwrap());
         }
         out.extend(r.flush().unwrap());
         assert_eq!(out.len(), batch.len());
-        let mse: f32 =
-            out.iter().zip(&batch).map(|(a, b)| (a - b) * (a - b)).sum::<f32>() / out.len() as f32;
+        let mse: f32 = out
+            .iter()
+            .zip(&batch)
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f32>()
+            / out.len() as f32;
         assert!(mse.sqrt() < 1e-3, "rms diff {}", mse.sqrt());
     }
 }

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
-use crossbeam_channel::{bounded, select, Receiver};
+use crossbeam_channel::{Receiver, bounded, select};
 
 use resample::StreamResampler;
 
@@ -52,7 +52,9 @@ pub struct RecordingStats {
 pub fn map_stream_error(e: &cpal::Error) -> RecorderError {
     use cpal::ErrorKind as K;
     match e.kind() {
-        K::DeviceNotAvailable | K::DeviceChanged | K::StreamInvalidated => RecorderError::DeviceLost,
+        K::DeviceNotAvailable | K::DeviceChanged | K::StreamInvalidated => {
+            RecorderError::DeviceLost
+        }
         K::PermissionDenied => RecorderError::PermissionDenied,
         _ => RecorderError::Other(e.to_string()),
     }
@@ -60,7 +62,10 @@ pub fn map_stream_error(e: &cpal::Error) -> RecorderError {
 
 /// Errors reported after the stream started that mean it can no longer deliver audio.
 fn is_fatal(e: &cpal::Error) -> bool {
-    matches!(map_stream_error(e), RecorderError::DeviceLost | RecorderError::PermissionDenied)
+    matches!(
+        map_stream_error(e),
+        RecorderError::DeviceLost | RecorderError::PermissionDenied
+    )
 }
 
 /// Names of the available input devices.
@@ -87,8 +92,13 @@ fn find_device(name: Option<&str>) -> Result<cpal::Device, RecorderError> {
 }
 
 enum Cmd {
-    Start { frame_tx: Sender<Vec<f32>>, ack: Sender<()> },
-    Stop { reply: Sender<Result<RecordingStats, RecorderError>> },
+    Start {
+        frame_tx: Sender<Vec<f32>>,
+        ack: Sender<()>,
+    },
+    Stop {
+        reply: Sender<Result<RecordingStats, RecorderError>>,
+    },
     Cancel,
     Shutdown,
 }
@@ -122,9 +132,16 @@ pub struct Recorder {
 
 impl Recorder {
     /// Validates the device selection; the stream itself is opened by `start()`.
-    pub fn new(device_name: Option<String>, level_tx: SyncSender<f32>) -> Result<Recorder, RecorderError> {
+    pub fn new(
+        device_name: Option<String>,
+        level_tx: SyncSender<f32>,
+    ) -> Result<Recorder, RecorderError> {
         find_device(device_name.as_deref())?;
-        Ok(Recorder { device_name, level_tx, inner: Mutex::new(None) })
+        Ok(Recorder {
+            device_name,
+            level_tx,
+            inner: Mutex::new(None),
+        })
     }
 
     fn open(&self) -> Result<Handle, RecorderError> {
@@ -141,11 +158,17 @@ impl Recorder {
             .name("flowlocal-audio".into())
             .spawn(move || run_worker(ctx, ready_tx))
             .map_err(|e| RecorderError::Other(e.to_string()))?;
-        let handle = Handle { cmd_tx, closed, join: Some(join) };
+        let handle = Handle {
+            cmd_tx,
+            closed,
+            join: Some(join),
+        };
         match ready_rx.recv_timeout(Duration::from_secs(10)) {
             Ok(Ok(())) => Ok(handle),
             Ok(Err(e)) => Err(e),
-            Err(_) => Err(RecorderError::Other("timed out opening input stream".into())),
+            Err(_) => Err(RecorderError::Other(
+                "timed out opening input stream".into(),
+            )),
         }
     }
 
@@ -154,14 +177,22 @@ impl Recorder {
             return false;
         }
         let (ack, ack_rx) = std::sync::mpsc::channel();
-        h.cmd_tx.send(Cmd::Start { frame_tx: frame_tx.clone(), ack }).is_ok()
+        h.cmd_tx
+            .send(Cmd::Start {
+                frame_tx: frame_tx.clone(),
+                ack,
+            })
+            .is_ok()
             && ack_rx.recv_timeout(Duration::from_secs(1)).is_ok()
     }
 
     /// Begin streaming 16 kHz mono ~20 ms frames to `frame_tx` (pre-roll first when warm).
     pub fn start(&self, frame_tx: Sender<Vec<f32>>) -> Result<(), RecorderError> {
         let mut inner = self.inner.lock().unwrap();
-        if inner.as_ref().is_some_and(|h| Self::try_start(h, &frame_tx)) {
+        if inner
+            .as_ref()
+            .is_some_and(|h| Self::try_start(h, &frame_tx))
+        {
             return Ok(());
         }
         *inner = None; // stream closed or lost: reopen cold
@@ -251,8 +282,14 @@ fn open_stream(
     dropped: Arc<AtomicU64>,
 ) -> Result<(cpal::Stream, u16, u32), RecorderError> {
     let device = find_device(device_name)?;
-    let supported = device.default_input_config().map_err(|e| map_stream_error(&e))?;
-    let (channels, rate, format) = (supported.channels(), supported.sample_rate(), supported.sample_format());
+    let supported = device
+        .default_input_config()
+        .map_err(|e| map_stream_error(&e))?;
+    let (channels, rate, format) = (
+        supported.channels(),
+        supported.sample_rate(),
+        supported.sample_format(),
+    );
     let config: cpal::StreamConfig = supported.into();
     let stream = match format {
         SampleFormat::F32 => build_stream::<f32>(&device, config, data_tx, pool_rx, lost, dropped),
@@ -262,7 +299,11 @@ fn open_stream(
         SampleFormat::I8 => build_stream::<i8>(&device, config, data_tx, pool_rx, lost, dropped),
         SampleFormat::U8 => build_stream::<u8>(&device, config, data_tx, pool_rx, lost, dropped),
         SampleFormat::F64 => build_stream::<f64>(&device, config, data_tx, pool_rx, lost, dropped),
-        other => return Err(RecorderError::Other(format!("unsupported sample format {other}"))),
+        other => {
+            return Err(RecorderError::Other(format!(
+                "unsupported sample format {other}"
+            )));
+        }
     }
     .map_err(|e| map_stream_error(&e))?;
     stream.play().map_err(|e| map_stream_error(&e))?;
@@ -294,7 +335,9 @@ impl Pipeline {
             self.level_sum += s * s;
             self.level_n += 1;
             if self.level_n == LEVEL_SAMPLES {
-                let _ = self.level_tx.try_send((self.level_sum / LEVEL_SAMPLES as f32).sqrt());
+                let _ = self
+                    .level_tx
+                    .try_send((self.level_sum / LEVEL_SAMPLES as f32).sqrt());
                 self.level_sum = 0.0;
                 self.level_n = 0;
             }
@@ -304,9 +347,11 @@ impl Pipeline {
     }
 
     fn emit_frames(&mut self) {
-        let Some(tx) = self.session.as_ref() else { return };
+        let Some(tx) = self.session.as_ref() else {
+            return;
+        };
         let whole = self.framer.len() / FRAME_LEN * FRAME_LEN;
-        for frame in self.framer[..whole].chunks_exact(FRAME_LEN) {
+        for frame in self.framer[..whole].as_chunks::<FRAME_LEN>().0 {
             if tx.send(frame.to_vec()).is_err() {
                 break; // consumer gone
             }
@@ -330,7 +375,11 @@ impl Pipeline {
 
     /// End the session. With `flush`, deliver the resampler tail and partial frame.
     fn finish(&mut self, flush: bool) -> Result<RecordingStats, RecorderError> {
-        let tail = if flush { self.resampler.flush() } else { self.resampler.flush().map(|_| Vec::new()) };
+        let tail = if flush {
+            self.resampler.flush()
+        } else {
+            self.resampler.flush().map(|_| Vec::new())
+        };
         let tail = tail?;
         if flush {
             self.push(&tail);
@@ -344,7 +393,9 @@ impl Pipeline {
         self.framer.clear();
         self.ring.clear();
         self.session = None; // drops the sender: the consumer sees the end
-        Ok(RecordingStats { duration_ms: self.emitted * 1000 / SAMPLE_RATE as u64 })
+        Ok(RecordingStats {
+            duration_ms: self.emitted * 1000 / SAMPLE_RATE as u64,
+        })
     }
 }
 
@@ -461,20 +512,30 @@ impl Engine {
 }
 
 fn run_worker(ctx: WorkerCtx, ready: std::sync::mpsc::Sender<Result<(), RecorderError>>) {
-    let WorkerCtx { device_name, level_tx, cmd_rx, closed } = ctx;
+    let WorkerCtx {
+        device_name,
+        level_tx,
+        cmd_rx,
+        closed,
+    } = ctx;
     let (data_tx, data_rx) = bounded::<Vec<f32>>(256);
     let (pool_tx, pool_rx) = bounded::<Vec<f32>>(64);
     let lost = Arc::new(AtomicBool::new(false));
     let dropped = Arc::new(AtomicU64::new(0));
-    let (stream, channels, rate) =
-        match open_stream(device_name.as_deref(), data_tx, pool_rx, lost.clone(), dropped.clone()) {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = ready.send(Err(e));
-                closed.store(true, Ordering::Release);
-                return;
-            }
-        };
+    let (stream, channels, rate) = match open_stream(
+        device_name.as_deref(),
+        data_tx,
+        pool_rx,
+        lost.clone(),
+        dropped.clone(),
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = ready.send(Err(e));
+            closed.store(true, Ordering::Release);
+            return;
+        }
+    };
     let mut engine = match Engine::new(channels, rate, level_tx, lost) {
         Ok(e) => e,
         Err(e) => {
@@ -505,7 +566,10 @@ fn run_worker(ctx: WorkerCtx, ready: std::sync::mpsc::Sender<Result<(), Recorder
         }
         let drops = dropped.load(Ordering::Relaxed);
         if drops != reported_drops {
-            tracing::warn!("dropped {} audio callback buffers (worker too slow)", drops - reported_drops);
+            tracing::warn!(
+                "dropped {} audio callback buffers (worker too slow)",
+                drops - reported_drops
+            );
             reported_drops = drops;
         }
         if engine.poll() == Flow::Exit {
@@ -519,7 +583,7 @@ fn run_worker(ctx: WorkerCtx, ready: std::sync::mpsc::Sender<Result<(), Recorder
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc::{channel, sync_channel, TryRecvError};
+    use std::sync::mpsc::{TryRecvError, channel, sync_channel};
 
     #[test]
     fn stream_error_maps_to_device_lost() {
@@ -534,7 +598,10 @@ mod tests {
         let mut e = Engine::new(1, 16_000, ltx, lost.clone()).unwrap();
         let (ftx, frx) = channel();
         let (ack, ack_rx) = channel();
-        assert_eq!(e.on_cmd(Cmd::Start { frame_tx: ftx, ack }, &mut || None), Flow::Continue);
+        assert_eq!(
+            e.on_cmd(Cmd::Start { frame_tx: ftx, ack }, &mut || None),
+            Flow::Continue
+        );
         ack_rx.recv().unwrap();
         e.feed(&vec![0.1; 1600]);
         lost.store(true, Ordering::Release);
@@ -547,7 +614,16 @@ mod tests {
         // a start on a failed worker must not ack (Recorder then reopens a fresh stream)
         let (ftx2, _frx2) = channel();
         let (ack2, ack2_rx) = channel();
-        assert_eq!(e.on_cmd(Cmd::Start { frame_tx: ftx2, ack: ack2 }, &mut || None), Flow::Exit);
+        assert_eq!(
+            e.on_cmd(
+                Cmd::Start {
+                    frame_tx: ftx2,
+                    ack: ack2
+                },
+                &mut || None
+            ),
+            Flow::Exit
+        );
         assert!(ack2_rx.recv().is_err());
     }
 
@@ -563,7 +639,10 @@ mod tests {
         e.poll();
         let (reply, reply_rx) = channel();
         assert_eq!(e.on_cmd(Cmd::Stop { reply }, &mut || None), Flow::Exit);
-        assert_eq!(reply_rx.recv().unwrap().unwrap_err(), RecorderError::DeviceLost);
+        assert_eq!(
+            reply_rx.recv().unwrap().unwrap_err(),
+            RecorderError::DeviceLost
+        );
     }
 
     #[test]
@@ -580,6 +659,10 @@ mod tests {
         let (ftx, frx) = channel();
         let (ack, _a) = channel();
         e.on_cmd(Cmd::Start { frame_tx: ftx, ack }, &mut || None);
-        assert_eq!(frx.try_iter().count(), 0, "warm start with nothing since stop must send no pre-roll");
+        assert_eq!(
+            frx.try_iter().count(),
+            0,
+            "warm start with nothing since stop must send no pre-roll"
+        );
     }
 }

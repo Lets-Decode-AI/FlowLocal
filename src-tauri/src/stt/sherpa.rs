@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use sherpa_rs::moonshine::{MoonshineConfig, MoonshineRecognizer};
 use sherpa_rs::sense_voice::{SenseVoiceConfig, SenseVoiceRecognizer};
 use sherpa_rs::transducer::{TransducerConfig, TransducerRecognizer};
@@ -10,8 +10,8 @@ use sherpa_rs::whisper::{WhisperConfig, WhisperRecognizer};
 
 use super::SttEngine;
 use crate::audio::SAMPLE_RATE;
-use crate::models::catalog::EngineKind;
 use crate::models::InstalledModel;
+use crate::models::catalog::EngineKind;
 
 enum Recognizer {
     Transducer(TransducerRecognizer),
@@ -34,11 +34,15 @@ impl SherpaEngine {
 
 /// `min(cores, 4)`.
 fn num_threads() -> i32 {
-    std::thread::available_parallelism().map_or(1, |n| n.get()).min(4) as i32
+    std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(4) as i32
 }
 
 fn path(p: PathBuf) -> Result<String> {
-    p.into_os_string().into_string().map_err(|p| anyhow!("model path is not valid UTF-8: {p:?}"))
+    p.into_os_string()
+        .into_string()
+        .map_err(|p| anyhow!("model path is not valid UTF-8: {p:?}"))
 }
 
 /// Execution providers to try, in order. CPU by default: measured on Apple Silicon, CoreML was
@@ -92,7 +96,12 @@ impl SttEngine for SherpaEngine {
                     encoder: path(m.file("encoder"))?,
                     decoder: path(m.file("decoder"))?,
                     tokens: path(m.file("tokens"))?,
-                    language: m.entry.languages.first().cloned().unwrap_or_else(|| "en".into()),
+                    language: m
+                        .entry
+                        .languages
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "en".into()),
                     num_threads: threads,
                     provider,
                     ..Default::default()
@@ -151,7 +160,6 @@ impl SttEngine for SherpaEngine {
         self.id.as_deref()
     }
 }
-
 
 #[cfg(test)]
 mod tests {
