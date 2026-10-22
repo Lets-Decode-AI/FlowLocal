@@ -24,7 +24,7 @@ pub enum Inspection {
 #[derive(Debug, Clone)]
 pub struct HfClient {
     base: String,
-    token: Option<String>,
+    token: std::sync::Arc<std::sync::RwLock<Option<String>>>,
     http: reqwest::Client,
 }
 
@@ -61,7 +61,16 @@ struct RawLfs {
 
 impl HfClient {
     pub fn new(token: Option<String>) -> Self {
-        Self { base: DEFAULT_BASE.to_string(), token, http: reqwest::Client::new() }
+        Self { base: DEFAULT_BASE.to_string(), token: std::sync::Arc::new(std::sync::RwLock::new(token)), http: reqwest::Client::new() }
+    }
+
+    /// Replace the bearer token; shared by every clone of this client.
+    pub fn set_token(&self, token: Option<String>) {
+        *self.token.write().unwrap_or_else(|p| p.into_inner()) = token;
+    }
+
+    fn token(&self) -> Option<String> {
+        self.token.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     /// Point the client at another server (tests).
@@ -78,7 +87,7 @@ impl HfClient {
     /// Authenticated GET builder for an absolute URL (bearer token when set).
     pub(crate) fn authed_get(&self, url: &str) -> reqwest::RequestBuilder {
         let req = self.http.get(url);
-        match &self.token {
+        match self.token() {
             Some(t) => req.bearer_auth(t),
             None => req,
         }
@@ -87,7 +96,7 @@ impl HfClient {
     fn get(&self, url: &str, params: &[(&str, &str)]) -> Result<reqwest::RequestBuilder> {
         let url = reqwest::Url::parse_with_params(url, params)?;
         let req = self.http.get(url);
-        Ok(match &self.token {
+        Ok(match self.token() {
             Some(t) => req.bearer_auth(t),
             None => req,
         })

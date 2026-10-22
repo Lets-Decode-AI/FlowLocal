@@ -138,6 +138,80 @@ impl RecorderPort for SwitchableRecorder {
     }
 }
 
+/// Launch-at-login registration (the Tauri autostart plugin in the app, a fake in tests).
+pub trait AutostartPort: Send + Sync {
+    fn is_enabled(&self) -> Result<bool, String>;
+    fn set(&self, on: bool) -> Result<(), String>;
+}
+
+pub struct PluginAutostart(pub tauri::AppHandle);
+
+impl AutostartPort for PluginAutostart {
+    fn is_enabled(&self) -> Result<bool, String> {
+        use tauri_plugin_autostart::ManagerExt;
+        self.0.autolaunch().is_enabled().map_err(|e| e.to_string())
+    }
+    fn set(&self, on: bool) -> Result<(), String> {
+        use tauri_plugin_autostart::ManagerExt;
+        let a = self.0.autolaunch();
+        (if on { a.enable() } else { a.disable() }).map_err(|e| e.to_string())
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+pub fn validate_settings(s: &Settings) -> Result<(), String> {
+    if s.hotkey.keys.is_empty() {
+        return Err("hotkey must contain at least one key".into());
+    }
+    if s.hotkey.keys.contains(&crate::hotkey::Key::Escape) {
+        return Err("Esc cannot be part of the hotkey (it cancels dictation)".into());
+    }
+    Ok(())
+}
+
+/// Validates `new`, applies the fallible side effect (autostart) first, and only then persists
+/// and publishes it. On error nothing is changed. Returns the previous settings.
+pub fn commit_settings(
+    store: &Store,
+    current: &Mutex<Settings>,
+    auto: &dyn AutostartPort,
+    new: Settings,
+) -> Result<Settings, String> {
+    validate_settings(&new)?;
+    let old = lock(current).clone();
+    if new.launch_at_login != old.launch_at_login {
+        auto.set(new.launch_at_login).map_err(|e| format!("could not change launch at login: {e}"))?;
+    }
+    if let Err(e) = store.set_setting(SETTINGS_KEY, &new) {
+        if new.launch_at_login != old.launch_at_login {
+            let _ = auto.set(old.launch_at_login); // best-effort rollback
+        }
+        return Err(format!("{e:#}"));
+    }
+    *lock(current) = new;
+    Ok(old)
+}
+
+/// At startup the OS registration wins over the stored flag.
+pub fn reconcile_autostart(store: &Store, current: &Mutex<Settings>, auto: &dyn AutostartPort) {
+    let Ok(os) = auto.is_enabled() else { return };
+    let mut cur = lock(current);
+    if cur.launch_at_login != os {
+        cur.launch_at_login = os;
+        let _ = store.set_setting(SETTINGS_KEY, &*cur);
+    }
+}
+
+/// A hotkey service that started with `started_with` must switch to the current binding if the
+/// user changed it in the meantime.
+pub fn binding_to_reapply(started_with: &Binding, current: &Mutex<Settings>) -> Option<Binding> {
+    let cur = lock(current).hotkey.clone();
+    (cur != *started_with).then_some(cur)
+}
+
 pub struct AppState {
     pub store: Arc<Store>,
     pub models: Manager,
@@ -145,7 +219,10 @@ pub struct AppState {
     pub recorder: Arc<SwitchableRecorder>,
     pub hotkey: Arc<Mutex<Option<HotkeyService>>>,
     pub controller: ControllerHandle,
-    pub settings: Mutex<Settings>,
+    pub settings: Arc<Mutex<Settings>>,
+    pub hf: crate::models::hf::HfClient,
+    pub hk_tx: Mutex<std::sync::mpsc::Sender<crate::hotkey::HotkeyEvent>>,
+    pub hotkey_starting: Arc<AtomicBool>,
     /// Last `dictation://state` payload (what `get_state` returns).
     pub dictation_state: Arc<Mutex<Value>>,
     pub paused: AtomicBool,
@@ -190,5 +267,78 @@ mod tests {
         let r = recommend_dto(&hw, "en-US");
         assert_eq!(r.id, "parakeet-v2");
         assert_eq!(r.hardware.cores, 8);
+    }
+}
+
+#[cfg(test)]
+mod settings_apply_tests {
+    use super::*;
+    use crate::hotkey::Key;
+
+    struct FakeAuto {
+        enabled: Mutex<bool>,
+        fail: bool,
+    }
+    impl AutostartPort for FakeAuto {
+        fn is_enabled(&self) -> Result<bool, String> {
+            Ok(*self.enabled.lock().unwrap())
+        }
+        fn set(&self, on: bool) -> Result<(), String> {
+            if self.fail {
+                return Err("denied".into());
+            }
+            *self.enabled.lock().unwrap() = on;
+            Ok(())
+        }
+    }
+
+    fn fixture(fail: bool) -> (Store, Mutex<Settings>, FakeAuto) {
+        (Store::open_in_memory().unwrap(), Mutex::new(Settings::default()), FakeAuto { enabled: Mutex::new(false), fail })
+    }
+
+    #[test]
+    fn autostart_failure_returns_err_and_keeps_old_settings() {
+        let (store, cur, auto) = fixture(true);
+        let new = Settings { launch_at_login: true, show_flowbar: false, ..Settings::default() };
+        let r = commit_settings(&store, &cur, &auto, new);
+        assert!(r.is_err());
+        assert_eq!(*cur.lock().unwrap(), Settings::default());
+        assert_eq!(store.get_setting::<Settings>(SETTINGS_KEY).unwrap(), None);
+    }
+
+    #[test]
+    fn autostart_success_persists_and_returns_old() {
+        let (store, cur, auto) = fixture(false);
+        let new = Settings { launch_at_login: true, ..Settings::default() };
+        let old = commit_settings(&store, &cur, &auto, new.clone()).unwrap();
+        assert_eq!(old, Settings::default());
+        assert!(*auto.enabled.lock().unwrap());
+        assert_eq!(*cur.lock().unwrap(), new);
+        assert_eq!(store.get_setting::<Settings>(SETTINGS_KEY).unwrap(), Some(new));
+    }
+
+    #[test]
+    fn escape_binding_rejected() {
+        let (store, cur, auto) = fixture(false);
+        let new = Settings { hotkey: Binding { keys: vec![Key::ControlLeft, Key::Escape] }, ..Settings::default() };
+        assert!(commit_settings(&store, &cur, &auto, new).is_err());
+        assert_eq!(*cur.lock().unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn startup_reconcile_trusts_os_state() {
+        let (store, cur, auto) = fixture(false);
+        cur.lock().unwrap().launch_at_login = true; // stored ON, OS says off
+        reconcile_autostart(&store, &cur, &auto);
+        assert!(!cur.lock().unwrap().launch_at_login);
+        assert!(!store.get_setting::<Settings>(SETTINGS_KEY).unwrap().unwrap().launch_at_login);
+    }
+
+    #[test]
+    fn binding_change_before_service_start_is_applied() {
+        let started_with = Binding { keys: vec![Key::Fn] };
+        let cur = Mutex::new(Settings { hotkey: Binding { keys: vec![Key::AltRight] }, ..Settings::default() });
+        assert_eq!(binding_to_reapply(&started_with, &cur), Some(Binding { keys: vec![Key::AltRight] }));
+        assert_eq!(binding_to_reapply(&Binding { keys: vec![Key::AltRight] }, &cur), None);
     }
 }

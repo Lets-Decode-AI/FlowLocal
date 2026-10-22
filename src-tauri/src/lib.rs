@@ -103,14 +103,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn toast(app: &AppHandle, level: &str, message: &str) {
-    let _ = app.emit(events::TOAST, json!({ "level": level, "message": message }));
-}
-
 /// Opens the store, builds every subsystem and registers `AppState`.
 fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use app_state::{AppState, SwitchableRecorder, SETTINGS_KEY};
-    use hotkey::{default_binding, fallback_binding, HotkeyError, HotkeyService};
+    use hotkey::HotkeyService;
 
     let handle = app.handle().clone();
     let data_dir = app.path().app_data_dir()?;
@@ -132,13 +128,19 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         })
     };
 
-    // Models.
+    // Models. The keychain read happens off this thread (it can block on a prompt); the token is
+    // shared by every clone of the client.
+    let hf = models::hf::HfClient::new(None);
+    {
+        let hf = hf.clone();
+        std::thread::spawn(move || hf.set_token(commands::stored_hf_token()));
+    }
     let progress_handle = handle.clone();
     let models = models::Manager::new(
         data_dir.join("models"),
         store.clone(),
         models::catalog::Catalog::bundled(),
-        models::hf::HfClient::new(commands::stored_hf_token()),
+        hf.clone(),
         Arc::new(move |p| {
             let _ = progress_handle.emit(events::DL_PROGRESS, &p);
         }),
@@ -164,51 +166,18 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let recorder = Arc::new(SwitchableRecorder::new(settings.mic.clone(), level_tx));
     let (hk_tx, hk_rx) = std::sync::mpsc::channel();
     let hotkey: Arc<Mutex<Option<HotkeyService>>> = Arc::default();
-    {
-        // Starting the macOS tap can block for up to 300 ms.
-        let slot = hotkey.clone();
-        let h = handle.clone();
-        let binding = settings.hotkey.clone();
-        std::thread::Builder::new().name("flowlocal-hotkey-start".into()).spawn(move || {
-            let mut notice: Option<(&str, String)> = None;
-            let started = match HotkeyService::start(binding.clone(), hk_tx.clone()) {
-                Ok(s) => Some(s),
-                Err(HotkeyError::TapUnavailable) if cfg!(target_os = "macos") && binding == default_binding() => {
-                    match HotkeyService::start(fallback_binding(), hk_tx.clone()) {
-                        Ok(s) => {
-                            notice = Some((
-                                "warning",
-                                "Fn key unavailable \u{2014} using Right \u{2325}. Grant Accessibility to use Fn.".into(),
-                            ));
-                            Some(s)
-                        }
-                        Err(e) => {
-                            notice = Some(("error", format!("Global hotkey unavailable: {e}")));
-                            None
-                        }
-                    }
-                }
-                Err(HotkeyError::Unsupported) => {
-                    notice = Some(("warning", "Global hotkey unavailable on Wayland".into()));
-                    None
-                }
-                Err(e) => {
-                    notice = Some(("error", format!("Global hotkey unavailable: {e}")));
-                    None
-                }
-            };
-            match &started {
-                Some(_) => tracing::info!("hotkey service started"),
-                None => tracing::warn!("hotkey service not started"),
-            }
-            *slot.lock().unwrap_or_else(|p| p.into_inner()) = started;
-            if let Some((level, msg)) = notice {
-                // Give the webviews time to subscribe before the one-shot toast.
-                std::thread::sleep(std::time::Duration::from_millis(2500));
-                toast(&h, level, &msg);
-            }
-        })?;
-    }
+    let settings_arc = Arc::new(Mutex::new(settings));
+    let hotkey_starting = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    commands::spawn_hotkey_start(
+        handle.clone(),
+        hotkey.clone(),
+        settings_arc.clone(),
+        hotkey_starting.clone(),
+        hk_tx.clone(),
+        std::time::Duration::from_millis(2500), // let the webviews subscribe before the toast
+    );
+    app_state::reconcile_autostart(&store, &settings_arc, &app_state::PluginAutostart(handle.clone()));
+    let settings = settings_arc.lock().unwrap_or_else(|p| p.into_inner()).clone();
 
     // Controller (needs a tokio runtime context).
     let store = Arc::new(store);
@@ -242,7 +211,10 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         recorder,
         hotkey,
         controller,
-        settings: Mutex::new(settings),
+        settings: settings_arc,
+        hf,
+        hk_tx: Mutex::new(hk_tx),
+        hotkey_starting,
         dictation_state: state_cache,
         paused: std::sync::atomic::AtomicBool::new(false),
         pause_item: Mutex::default(),

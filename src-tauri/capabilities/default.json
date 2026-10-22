@@ -3,9 +3,5 @@
   "identifier": "default",
   "description": "Capability for the app windows: invoke app commands and listen to backend events",
   "windows": ["main", "flowbar"],
-  "permissions": [
-    "core:default",
-    "core:event:allow-listen",
-    "core:event:allow-unlisten"
-  ]
+  "permissions": ["core:default"]
 }
