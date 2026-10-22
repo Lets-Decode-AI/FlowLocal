@@ -13,7 +13,6 @@ export default function History() {
   const [items, setItems] = useState<Transcript[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const page = useRef(0);
   const busy = useRef(false);
   const gen = useRef(0);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -27,7 +26,6 @@ export default function History() {
   // (Re)load from page 0 whenever the debounced query changes.
   useEffect(() => {
     const g = ++gen.current;
-    page.current = 0;
     busy.current = true;
     api.historyList(0, q).then(
       (r) => {
@@ -38,6 +36,7 @@ export default function History() {
         busy.current = false;
       },
       (e) => {
+        if (g !== gen.current) return;
         busy.current = false;
         toast(errMsg(e), 'error');
       },
@@ -49,17 +48,19 @@ export default function History() {
     busy.current = true;
     const g = gen.current;
     try {
-      const r = await api.historyList(page.current + 1, q);
+      // Page by how much we hold, not by a page counter: local deletes shift server offsets.
+      // Re-fetching an overlapping page is safe because rows are deduped by id.
+      const r = await api.historyList(Math.floor(items.length / PAGE_SIZE), q);
       if (g !== gen.current) return;
-      page.current += 1;
-      setItems((x) => [...x, ...r.filter((n) => !x.some((o) => o.id === n.id))]);
-      setHasMore(r.length === PAGE_SIZE);
+      const fresh = r.filter((n) => !items.some((o) => o.id === n.id));
+      setItems((x) => [...x, ...fresh.filter((n) => !x.some((o) => o.id === n.id))]);
+      setHasMore(r.length === PAGE_SIZE && fresh.length > 0);
     } catch (e) {
-      toast(errMsg(e), 'error');
+      if (g === gen.current) toast(errMsg(e), 'error');
     } finally {
-      busy.current = false;
+      if (g === gen.current) busy.current = false;
     }
-  }, [hasMore, q, toast]);
+  }, [hasMore, items, q, toast]);
 
   useEffect(() => {
     const el = sentinel.current;
@@ -71,8 +72,10 @@ export default function History() {
 
   // Live prepend: fetch the newest page and add what we have not seen.
   useEvent('transcriptAdded', async () => {
+    const g = gen.current;
     try {
       const r = await api.historyList(0, q);
+      if (g !== gen.current) return;
       setItems((x) => {
         const fresh = r.filter((n) => !x.some((o) => o.id === n.id));
         return fresh.length ? [...fresh, ...x] : x;

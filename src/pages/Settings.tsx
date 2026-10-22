@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, type DictEntry, type Settings as S } from '../ipc';
 import HotkeyInput from '../components/HotkeyInput';
 import Toggle from '../components/Toggle';
@@ -25,24 +25,35 @@ export default function Settings() {
   const [mics, setMics] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const confirmed = useRef<S | null>(null); // last state the backend accepted
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const pending = useRef(0);
+
   useEffect(() => {
-    api.settingsGet().then(setS, (e) => setError(errMsg(e)));
+    api.settingsGet().then((v) => { confirmed.current = v; setS(v); }, (e) => setError(errMsg(e)));
     api.micList().then(setMics, () => {});
   }, []);
 
-  const save = async (patch: Partial<S>) => {
-    if (!s) return;
-    const next = { ...s, ...patch };
-    const prev = s;
-    setS(next);
+  // Saves run one at a time, each applied on top of the last accepted state, so a rejected
+  // save can never wipe a later one.
+  const save = (patch: Partial<S>) => {
+    setS((x) => (x ? { ...x, ...patch } : x));
     setError(null);
-    try {
-      await api.settingsSet(next);
-    } catch (e) {
-      setS(prev); // backend rejected it (invalid binding, autostart failure, …)
-      setError(errMsg(e));
-      toast(errMsg(e), 'error');
-    }
+    pending.current++;
+    queue.current = queue.current.then(async () => {
+      try {
+        const base = confirmed.current;
+        if (!base) return;
+        const next = { ...base, ...patch };
+        await api.settingsSet(next);
+        confirmed.current = next;
+      } catch (e) {
+        setError(errMsg(e)); // backend rejected it (invalid binding, autostart failure, …)
+        toast(errMsg(e), 'error');
+      } finally {
+        if (--pending.current === 0) setS(confirmed.current);
+      }
+    });
   };
 
   if (!s) return <div className="page">{error && <div className="row-error">{error}</div>}</div>;

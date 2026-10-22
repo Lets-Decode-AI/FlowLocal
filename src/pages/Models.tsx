@@ -91,7 +91,7 @@ export default function Models() {
             <ModelRow key={m.id} id={m.id} name={m.name} meta={meta(m, fmtBytes(m.diskBytes))} installed active={m.active} progress={progress[m.id]} {...actions(m.id)} />
           ))}
           {inFlight.map((p) => (
-            <ModelRow key={p.modelId} id={p.modelId} name={nameOf(p.modelId)} meta="Downloading" installed={false} active={false} progress={p} {...actions(p.modelId)} />
+            <ModelRow key={p.modelId} id={p.modelId} name={nameOf(p.modelId)} meta={typeof p.status === 'object' ? 'Failed' : 'Downloading'} installed={false} active={false} progress={p} {...actions(p.modelId)} />
           ))}
           {installed.length > 0 && <div className="foot muted">Disk usage: {fmtBytes(totalDisk)}</div>}
         </section>
@@ -121,6 +121,8 @@ function HfSearch({ progress, installedIds, onInstalled }: { progress: Record<st
   useEffect(() => {
     const term = q.trim();
     if (!term) {
+      seq.current++; // drop any in-flight response
+      setLoading(false);
       setResults(null);
       return;
     }

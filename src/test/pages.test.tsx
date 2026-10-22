@@ -89,6 +89,24 @@ describe('Onboarding', () => {
   });
 });
 
+describe('Onboarding paused', () => {
+  it('onboarding_paused_download_offers_resume', async () => {
+    render(<Onboarding />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: /get started/i }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: /download/i }));
+    await flush();
+    emit('progress', { modelId: 'm1', bytesDone: 50, total: 100, bytesPerSec: 0, etaSecs: null, status: 'Paused', error: null });
+    fireEvent.click(screen.getByRole('button', { name: /^resume$/i }));
+    expect(a.modelResume).toHaveBeenCalledWith('m1');
+    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /choose another/i })).toBeTruthy();
+  });
+});
+
 describe('Models', () => {
   it('models_install_button_calls_api', async () => {
     render(<Models />);
@@ -134,6 +152,26 @@ describe('History', () => {
   });
 });
 
+describe('History paging', () => {
+  it('history_delete_then_load_more_does_not_skip', async () => {
+    let server = Array.from({ length: 120 }, (_, i) => ({ id: i, createdAt: 0, text: `row-${i}`, rawText: '', appName: null, durationMs: 0, wordCount: 1, wpm: 0, modelId: 'm' }));
+    a.historyList.mockImplementation(async (page: number) => server.slice(page * 50, page * 50 + 50));
+    a.historyDelete.mockImplementation(async (id: number) => { server = server.filter((r) => r.id !== id); });
+    render(<History />);
+    await flush();
+    fireEvent.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+    await flush();
+    expect(screen.getAllByText('row-50')).toHaveLength(1);
+    expect(screen.queryByText('row-0')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+    await flush();
+    expect(screen.getAllByText('row-51')).toHaveLength(1);
+    expect(screen.getAllByText('row-100')).toHaveLength(1);
+  });
+});
+
 describe('Settings', () => {
   it('settings_hotkey_change_persists', async () => {
     render(<Settings />);
@@ -151,5 +189,27 @@ describe('Settings', () => {
     fireEvent.keyUp(window, { code: 'Escape' });
     await flush();
     expect(a.settingsSet).not.toHaveBeenCalled();
+    expect(screen.queryByText(/press the keys/i)).toBeNull();
+  });
+
+  it('hotkey_records_a_chord', async () => {
+    render(<Settings />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: /record/i }));
+    fireEvent.keyDown(window, { code: 'ControlLeft' });
+    fireEvent.keyDown(window, { code: 'MetaLeft' });
+    fireEvent.keyUp(window, { code: 'MetaLeft' });
+    await flush();
+    expect(a.settingsSet).toHaveBeenCalledWith({ ...settings, hotkey: { keys: ['ControlLeft', 'MetaLeft'] } });
+  });
+
+  it('settings_save_error_reverts', async () => {
+    a.settingsSet.mockRejectedValueOnce('invalid binding');
+    render(<Settings />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Right ⌥' }));
+    await flush();
+    expect(screen.getByRole('alert').textContent).toContain('invalid binding');
+    expect(screen.getByText('Fn', { selector: '.hotkey-current' })).toBeTruthy();
   });
 });

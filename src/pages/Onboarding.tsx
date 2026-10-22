@@ -118,7 +118,8 @@ function ModelStep({ onNext }: { onNext: () => void }) {
   const isInstalled = !!chosen && installedIds.includes(chosen);
   const st = progress?.status;
   const failed = typeof st === 'object' && st !== null ? st.Failed : null;
-  const downloading = !isInstalled && (st === 'Downloading' || st === 'Queued' || st === 'Verifying' || st === 'Paused');
+  const paused = !isInstalled && st === 'Paused';
+  const downloading = !isInstalled && (st === 'Downloading' || st === 'Queued' || st === 'Verifying');
   const pct = progress && progress.total > 0 ? (progress.bytesDone / progress.total) * 100 : 0;
 
   const download = async () => {
@@ -126,6 +127,23 @@ function ModelStep({ onNext }: { onNext: () => void }) {
     setProgress(null);
     try {
       await api.modelInstall(chosen);
+    } catch (e) {
+      toast(errMsg(e), 'error');
+    }
+  };
+  const act = async (f: () => Promise<void>, after?: () => void) => {
+    try {
+      await f();
+      after?.();
+    } catch (e) {
+      toast(errMsg(e), 'error');
+    }
+  };
+  const proceed = async () => {
+    // The recommended model may already be installed without being active.
+    try {
+      if (chosen) await api.modelSetActive(chosen);
+      onNext();
     } catch (e) {
       toast(errMsg(e), 'error');
     }
@@ -145,16 +163,21 @@ function ModelStep({ onNext }: { onNext: () => void }) {
           <div className="row-main">
             <div className="row-title">{entry.name}</div>
             <div className="row-sub">{entry.languages.length > 6 ? `${entry.languages.length} languages` : entry.languages.join(', ')} · {fmtBytes(entry.files.reduce((n, f) => n + f.size, 0))}</div>
-            {downloading && progress && (
+            {(downloading || paused) && progress && (
               <div className="row-progress">
                 <ProgressBar value={pct} label="Model download" />
-                <div className="row-sub">{st === 'Verifying' ? 'Verifying…' : `${fmtBytes(progress.bytesDone)} of ${fmtBytes(progress.total)} ${fmtEta(progress.etaSecs)}`}</div>
+                <div className="row-sub">{st === 'Verifying' ? 'Verifying…' : paused ? 'Paused' : `${fmtBytes(progress.bytesDone)} of ${fmtBytes(progress.total)} ${fmtEta(progress.etaSecs)}`}</div>
               </div>
             )}
             {failed && <div className="row-error">Download failed: {failed}</div>}
           </div>
           <div className="row-actions">
-            {isInstalled ? <span className="badge badge-ok">Installed</span> : !downloading && <button className="btn btn-primary" onClick={download}>{failed ? 'Retry' : 'Download'}</button>}
+            {isInstalled ? <span className="badge badge-ok">Installed</span> : paused ? (
+              <>
+                <button className="btn btn-primary" onClick={() => chosen && act(() => api.modelResume(chosen))}>Resume</button>
+                <button className="btn btn-ghost" onClick={() => chosen && act(() => api.modelCancel(chosen), () => setProgress(null))}>Cancel</button>
+              </>
+            ) : !downloading && <button className="btn btn-primary" onClick={download}>{failed ? 'Retry' : 'Download'}</button>}
           </div>
         </div>
       )}
@@ -169,7 +192,7 @@ function ModelStep({ onNext }: { onNext: () => void }) {
       )}
       <div className="onb-actions">
         {!downloading && <button className="btn btn-ghost" onClick={() => setPicking((x) => !x)}>{picking ? 'Back' : 'Choose another'}</button>}
-        <button className="btn btn-primary" disabled={!isInstalled} onClick={onNext}>Continue</button>
+        <button className="btn btn-primary" disabled={!isInstalled} onClick={proceed}>Continue</button>
       </div>
     </>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Binding, Key } from '../ipc';
 
 const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
@@ -27,6 +27,8 @@ const same = (a: Binding, b: Key[]) => a.keys.length === b.length && b.every((k)
 
 export default function HotkeyInput({ value, onChange }: { value: Binding; onChange: (b: Binding) => void }) {
   const [recording, setRecording] = useState(false);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     if (!recording) return;
@@ -49,7 +51,7 @@ export default function HotkeyInput({ value, onChange }: { value: Binding; onCha
       if (chord.length) {
         e.preventDefault();
         setRecording(false);
-        onChange({ keys: [...chord] });
+        onChangeRef.current({ keys: [...chord] });
       }
     };
     window.addEventListener('keydown', down, true);
@@ -58,7 +60,7 @@ export default function HotkeyInput({ value, onChange }: { value: Binding; onCha
       window.removeEventListener('keydown', down, true);
       window.removeEventListener('keyup', up, true);
     };
-  }, [recording, onChange]);
+  }, [recording]);
 
   return (
     <div className="hotkey">
