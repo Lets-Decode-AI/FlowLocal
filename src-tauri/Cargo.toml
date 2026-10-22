@@ -50,7 +50,8 @@ futures-util = "0.3.34"
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# STT worker panic recovery (catch_unwind + reload) depends on unwinding.
+panic = "unwind"
 strip = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

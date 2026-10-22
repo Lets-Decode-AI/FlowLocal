@@ -36,18 +36,27 @@ pub struct FakeEngine {
     pub delay: Duration,
     /// Number of upcoming `transcribe` calls that panic.
     pub panics: Arc<AtomicUsize>,
+    /// Number of upcoming `load` calls that fail.
+    pub load_failures: Arc<AtomicUsize>,
     loaded: Option<String>,
 }
 
 impl FakeEngine {
     pub fn new(probe: &Probe, delay: Duration) -> Self {
-        Self { probe: probe.clone(), delay, panics: Arc::default(), loaded: None }
+        Self { probe: probe.clone(), delay, panics: Arc::default(), load_failures: Arc::default(), loaded: None }
     }
 }
 
 impl SttEngine for FakeEngine {
     fn load(&mut self, m: &InstalledModel) -> Result<()> {
         self.probe.push(format!("load {}", m.entry.id));
+        if self
+            .load_failures
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+        {
+            bail!("fake load failure");
+        }
         self.loaded = Some(m.entry.id.clone());
         Ok(())
     }

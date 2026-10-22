@@ -63,6 +63,12 @@ impl SttHandle {
         let _ = self.tx.send(Cmd::SetIdle(idle));
     }
 
+    /// A handle whose worker is gone (tests).
+    #[cfg(test)]
+    pub(super) fn dead() -> SttHandle {
+        SttHandle { tx: mpsc::channel().0 }
+    }
+
     /// Queues a job; false if the worker is gone.
     pub(super) fn submit(&self, job: Job) -> bool {
         self.tx.send(Cmd::Job(job)).is_ok()
@@ -76,15 +82,19 @@ fn ensure_loaded(engine: &mut dyn SttEngine, model: &InstalledModel) -> Result<(
     if engine.loaded_id().is_some() {
         engine.unload();
     }
-    let loaded = catch_unwind(AssertUnwindSafe(|| engine.load(model)));
-    match loaded {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(SttError::LoadFailed(format!("{e:#}"))),
-        Err(_) => {
-            engine.unload();
-            Err(SttError::LoadFailed("engine panicked while loading".into()))
+    // One automatic retry: a failed (or panicking) load is attempted a second time.
+    let mut last = String::new();
+    for _ in 0..2 {
+        match catch_unwind(AssertUnwindSafe(|| engine.load(model))) {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(e)) => last = format!("{e:#}"),
+            Err(_) => {
+                engine.unload();
+                last = "engine panicked while loading".into();
+            }
         }
     }
+    Err(SttError::LoadFailed(last))
 }
 
 fn guarded_transcribe(engine: &mut dyn SttEngine, samples: &[f32]) -> Result<String, Option<String>> {
@@ -230,5 +240,22 @@ mod tests {
         assert!(matches!(one(&h, "a", 3).await, Err(SttError::EngineFailed(_))));
         assert_eq!(probe.count("load"), 2);
         assert_eq!(probe.count("start"), 2);
+    }
+
+    #[tokio::test]
+    async fn load_failure_retries_once_then_errors() {
+        let probe = Probe::default();
+        let eng = FakeEngine::new(&probe, Duration::ZERO);
+        eng.load_failures.store(1, Ordering::SeqCst);
+        let h = SttWorker::spawn(Box::new(eng), None);
+        assert_eq!(one(&h, "a", 1).await.unwrap(), "c1");
+        assert_eq!(probe.count("load"), 2);
+
+        let probe = Probe::default();
+        let eng = FakeEngine::new(&probe, Duration::ZERO);
+        eng.load_failures.store(2, Ordering::SeqCst);
+        let h = SttWorker::spawn(Box::new(eng), None);
+        assert!(matches!(h.preload(fake_model("a")).await, Err(SttError::LoadFailed(_))));
+        assert_eq!(probe.count("load"), 2);
     }
 }

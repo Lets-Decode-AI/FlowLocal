@@ -14,12 +14,14 @@ pub struct SttSession {
     handle: SttHandle,
     model: InstalledModel,
     cancelled: Arc<AtomicBool>,
+    /// A chunk could not be queued because the worker is gone.
+    worker_gone: AtomicBool,
     pending: Mutex<Vec<oneshot::Receiver<Result<String, SttError>>>>,
 }
 
 impl SttSession {
     pub(super) fn new(handle: SttHandle, model: InstalledModel) -> Self {
-        Self { handle, model, cancelled: Arc::default(), pending: Mutex::default() }
+        Self { handle, model, cancelled: Arc::default(), worker_gone: AtomicBool::new(false), pending: Mutex::default() }
     }
 
     /// Queue a chunk for transcription; returns immediately. Chunks without speech are skipped.
@@ -31,6 +33,8 @@ impl SttSession {
         let job = Job { model: self.model.clone(), samples: chunk.samples, cancelled: self.cancelled.clone(), reply };
         if self.handle.submit(job) {
             self.pending.lock().unwrap().push(rx);
+        } else {
+            self.worker_gone.store(true, Ordering::SeqCst);
         }
     }
 
@@ -38,6 +42,9 @@ impl SttSession {
     pub async fn finish(self, tail: Option<Chunk>) -> Result<String, SttError> {
         if let Some(t) = tail {
             self.feed(t);
+        }
+        if self.worker_gone.load(Ordering::SeqCst) {
+            return Err(SttError::WorkerGone);
         }
         let receivers = std::mem::take(&mut *self.pending.lock().unwrap());
         let mut texts = Vec::with_capacity(receivers.len());
@@ -66,7 +73,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use crate::stt::testutil::*;
-    use crate::stt::{Chunk, SttWorker};
+    use crate::stt::{Chunk, SttError, SttHandle, SttSession, SttWorker};
 
     #[tokio::test]
     async fn session_transcribes_chunks_in_order_while_feeding() {
@@ -131,5 +138,12 @@ mod tests {
         let silent_tail = Chunk { samples: vec![8.0; 160], has_speech: false, start_ms: 0 };
         assert_eq!(s.finish(Some(silent_tail)).await.unwrap(), "c1");
         assert_eq!(probe.count("start"), 1);
+    }
+
+    #[tokio::test]
+    async fn finish_errors_if_feed_failed_worker_gone() {
+        let s = SttSession::new(SttHandle::dead(), fake_model("a"));
+        s.feed(speech_chunk(1));
+        assert_eq!(s.finish(None).await, Err(SttError::WorkerGone));
     }
 }
