@@ -5,7 +5,7 @@ pub mod audio;
 mod commands;
 mod dictation;
 mod events;
-mod hotkey;
+pub mod hotkey;
 pub mod insert;
 pub mod models;
 mod permissions;
