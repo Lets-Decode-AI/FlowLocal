@@ -5,7 +5,7 @@ pub mod resample;
 pub mod vad;
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -214,6 +214,7 @@ fn build_stream<T>(
     data_tx: crossbeam_channel::Sender<Vec<f32>>,
     pool_rx: Receiver<Vec<f32>>,
     lost: Arc<AtomicBool>,
+    dropped: Arc<AtomicU64>,
 ) -> Result<cpal::Stream, cpal::Error>
 where
     T: SizedSample,
@@ -226,11 +227,16 @@ where
             let mut buf = pool_rx.try_recv().unwrap_or_default();
             buf.clear();
             buf.extend(data.iter().map(|&s| f32::from_sample_(s)));
-            let _ = data_tx.try_send(buf);
+            if data_tx.try_send(buf).is_err() {
+                dropped.fetch_add(1, Ordering::Relaxed);
+            }
         },
         move |e| {
             if is_fatal(&e) {
+                tracing::error!("input stream failed: {e}");
                 lost.store(true, Ordering::Release);
+            } else {
+                tracing::warn!("non-fatal input stream error: {e}");
             }
         },
         None,
@@ -242,19 +248,20 @@ fn open_stream(
     data_tx: crossbeam_channel::Sender<Vec<f32>>,
     pool_rx: Receiver<Vec<f32>>,
     lost: Arc<AtomicBool>,
+    dropped: Arc<AtomicU64>,
 ) -> Result<(cpal::Stream, u16, u32), RecorderError> {
     let device = find_device(device_name)?;
     let supported = device.default_input_config().map_err(|e| map_stream_error(&e))?;
     let (channels, rate, format) = (supported.channels(), supported.sample_rate(), supported.sample_format());
     let config: cpal::StreamConfig = supported.into();
     let stream = match format {
-        SampleFormat::F32 => build_stream::<f32>(&device, config, data_tx, pool_rx, lost),
-        SampleFormat::I16 => build_stream::<i16>(&device, config, data_tx, pool_rx, lost),
-        SampleFormat::U16 => build_stream::<u16>(&device, config, data_tx, pool_rx, lost),
-        SampleFormat::I32 => build_stream::<i32>(&device, config, data_tx, pool_rx, lost),
-        SampleFormat::I8 => build_stream::<i8>(&device, config, data_tx, pool_rx, lost),
-        SampleFormat::U8 => build_stream::<u8>(&device, config, data_tx, pool_rx, lost),
-        SampleFormat::F64 => build_stream::<f64>(&device, config, data_tx, pool_rx, lost),
+        SampleFormat::F32 => build_stream::<f32>(&device, config, data_tx, pool_rx, lost, dropped),
+        SampleFormat::I16 => build_stream::<i16>(&device, config, data_tx, pool_rx, lost, dropped),
+        SampleFormat::U16 => build_stream::<u16>(&device, config, data_tx, pool_rx, lost, dropped),
+        SampleFormat::I32 => build_stream::<i32>(&device, config, data_tx, pool_rx, lost, dropped),
+        SampleFormat::I8 => build_stream::<i8>(&device, config, data_tx, pool_rx, lost, dropped),
+        SampleFormat::U8 => build_stream::<u8>(&device, config, data_tx, pool_rx, lost, dropped),
+        SampleFormat::F64 => build_stream::<f64>(&device, config, data_tx, pool_rx, lost, dropped),
         other => return Err(RecorderError::Other(format!("unsupported sample format {other}"))),
     }
     .map_err(|e| map_stream_error(&e))?;
@@ -276,10 +283,11 @@ struct Pipeline {
 
 impl Pipeline {
     fn push(&mut self, samples: &[f32]) {
-        self.ring.extend(samples.iter().copied());
-        let excess = self.ring.len().saturating_sub(PREROLL_SAMPLES);
-        self.ring.drain(..excess);
         if self.session.is_none() {
+            // Idle but warm: keep only the most recent 300 ms for the next start().
+            self.ring.extend(samples.iter().copied());
+            let excess = self.ring.len().saturating_sub(PREROLL_SAMPLES);
+            self.ring.drain(..excess);
             return;
         }
         for &s in samples {
@@ -317,11 +325,13 @@ impl Pipeline {
             self.framer.extend(self.ring.iter().copied());
             self.emit_frames();
         }
+        self.ring.clear(); // never re-delivered to a later session
     }
 
     /// End the session. With `flush`, deliver the resampler tail and partial frame.
-    fn finish(&mut self, flush: bool) -> RecordingStats {
-        let tail = self.resampler.flush();
+    fn finish(&mut self, flush: bool) -> Result<RecordingStats, RecorderError> {
+        let tail = if flush { self.resampler.flush() } else { self.resampler.flush().map(|_| Vec::new()) };
+        let tail = tail?;
         if flush {
             self.push(&tail);
             if !self.framer.is_empty() {
@@ -332,8 +342,121 @@ impl Pipeline {
             }
         }
         self.framer.clear();
+        self.ring.clear();
         self.session = None; // drops the sender: the consumer sees the end
-        RecordingStats { duration_ms: self.emitted * 1000 / SAMPLE_RATE as u64 }
+        Ok(RecordingStats { duration_ms: self.emitted * 1000 / SAMPLE_RATE as u64 })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flow {
+    Continue,
+    Exit,
+}
+
+/// Hardware-independent worker state machine.
+struct Engine {
+    p: Pipeline,
+    /// Some = warm, waiting for the next dictation.
+    idle_since: Option<Instant>,
+    /// The stream died (or processing failed) while a session was open; the worker only
+    /// lives on to answer `stop()` with `DeviceLost`.
+    failed: bool,
+    lost: Arc<AtomicBool>,
+}
+
+impl Engine {
+    fn new(
+        channels: u16,
+        rate: u32,
+        level_tx: SyncSender<f32>,
+        lost: Arc<AtomicBool>,
+    ) -> Result<Self, RecorderError> {
+        Ok(Self {
+            p: Pipeline {
+                resampler: StreamResampler::new(channels, rate)?,
+                ring: VecDeque::new(),
+                framer: Vec::new(),
+                session: None,
+                emitted: 0,
+                level_sum: 0.0,
+                level_n: 0,
+                level_tx,
+            },
+            idle_since: None,
+            failed: false,
+            lost,
+        })
+    }
+
+    /// Process one raw interleaved buffer; a resampler error marks the stream lost.
+    fn feed(&mut self, buf: &[f32]) {
+        match self.p.resampler.process(buf) {
+            Ok(out) => self.p.push(&out),
+            Err(e) => {
+                tracing::error!("audio processing failed: {e}");
+                self.lost.store(true, Ordering::Release);
+            }
+        }
+    }
+
+    fn on_cmd(&mut self, cmd: Cmd, drain: &mut dyn FnMut() -> Option<Vec<f32>>) -> Flow {
+        match cmd {
+            Cmd::Start { frame_tx, ack } => {
+                if self.failed {
+                    return Flow::Exit; // ack dropped: the recorder reopens a fresh stream
+                }
+                self.p.start(frame_tx, self.idle_since.is_some());
+                self.idle_since = None;
+                let _ = ack.send(());
+                Flow::Continue
+            }
+            Cmd::Stop { reply } => {
+                if self.p.session.is_none() && !self.failed {
+                    let _ = reply.send(Err(RecorderError::Other("not recording".into())));
+                    return Flow::Continue;
+                }
+                while let Some(buf) = drain() {
+                    self.feed(&buf);
+                }
+                let stats = self.p.finish(true);
+                if self.failed || self.lost.load(Ordering::Acquire) {
+                    let _ = reply.send(Err(RecorderError::DeviceLost));
+                    return Flow::Exit;
+                }
+                self.idle_since = Some(Instant::now());
+                let _ = reply.send(stats);
+                Flow::Continue
+            }
+            Cmd::Cancel => {
+                if self.failed {
+                    return Flow::Exit;
+                }
+                if self.p.session.is_some() {
+                    let _ = self.p.finish(false);
+                    self.idle_since = Some(Instant::now());
+                }
+                Flow::Continue
+            }
+            Cmd::Shutdown => Flow::Exit,
+        }
+    }
+
+    /// Check for stream loss and warm-timer expiry.
+    fn poll(&mut self) -> Flow {
+        if self.lost.load(Ordering::Acquire) && !self.failed {
+            if self.p.session.is_some() {
+                // Deliver what we have; `stop()` will report DeviceLost.
+                let _ = self.p.finish(true);
+                self.failed = true;
+            } else {
+                return Flow::Exit;
+            }
+        }
+        if self.idle_since.is_some_and(|t| t.elapsed() >= WARM_FOR) {
+            return Flow::Exit;
+        }
+        Flow::Continue
     }
 }
 
@@ -342,8 +465,9 @@ fn run_worker(ctx: WorkerCtx, ready: std::sync::mpsc::Sender<Result<(), Recorder
     let (data_tx, data_rx) = bounded::<Vec<f32>>(256);
     let (pool_tx, pool_rx) = bounded::<Vec<f32>>(64);
     let lost = Arc::new(AtomicBool::new(false));
+    let dropped = Arc::new(AtomicU64::new(0));
     let (stream, channels, rate) =
-        match open_stream(device_name.as_deref(), data_tx, pool_rx, lost.clone()) {
+        match open_stream(device_name.as_deref(), data_tx, pool_rx, lost.clone(), dropped.clone()) {
             Ok(v) => v,
             Err(e) => {
                 let _ = ready.send(Err(e));
@@ -351,70 +475,40 @@ fn run_worker(ctx: WorkerCtx, ready: std::sync::mpsc::Sender<Result<(), Recorder
                 return;
             }
         };
+    let mut engine = match Engine::new(channels, rate, level_tx, lost) {
+        Ok(e) => e,
+        Err(e) => {
+            let _ = ready.send(Err(e));
+            closed.store(true, Ordering::Release);
+            return;
+        }
+    };
     let _ = ready.send(Ok(()));
 
-    let mut p = Pipeline {
-        resampler: StreamResampler::new(channels, rate),
-        ring: VecDeque::new(),
-        framer: Vec::new(),
-        session: None,
-        emitted: 0,
-        level_sum: 0.0,
-        level_n: 0,
-        level_tx,
-    };
-    let mut idle_since: Option<Instant> = None; // Some = warm, waiting for next dictation
-    let mut failed = false;
-
-    let consume = |p: &mut Pipeline, buf: Vec<f32>| {
-        let out = p.resampler.process(&buf);
-        p.push(&out);
-        let _ = pool_tx.try_send(buf);
-    };
-
+    let mut reported_drops = 0;
     loop {
         select! {
-            recv(data_rx) -> m => if let Ok(buf) = m { consume(&mut p, buf) },
-            recv(cmd_rx) -> c => match c {
-                Ok(Cmd::Start { frame_tx, ack }) => {
-                    p.start(frame_tx, idle_since.is_some());
-                    idle_since = None;
-                    let _ = ack.send(());
+            recv(data_rx) -> m => if let Ok(buf) = m {
+                engine.feed(&buf);
+                let _ = pool_tx.try_send(buf);
+            },
+            recv(cmd_rx) -> c => {
+                let flow = match c {
+                    Ok(cmd) => engine.on_cmd(cmd, &mut || data_rx.try_recv().ok()),
+                    Err(_) => Flow::Exit,
+                };
+                if flow == Flow::Exit {
+                    break;
                 }
-                Ok(Cmd::Stop { reply }) => {
-                    if p.session.is_none() && !failed {
-                        let _ = reply.send(Err(RecorderError::Other("not recording".into())));
-                        continue;
-                    }
-                    while let Ok(buf) = data_rx.try_recv() { consume(&mut p, buf) }
-                    let stats = p.finish(true);
-                    if failed || lost.load(Ordering::Acquire) {
-                        let _ = reply.send(Err(RecorderError::DeviceLost));
-                        break;
-                    }
-                    idle_since = Some(Instant::now());
-                    let _ = reply.send(Ok(stats));
-                }
-                Ok(Cmd::Cancel) => {
-                    if p.session.is_some() {
-                        p.finish(false);
-                        idle_since = Some(Instant::now());
-                    }
-                }
-                Ok(Cmd::Shutdown) | Err(_) => break,
             },
             default(POLL) => {}
         }
-        if lost.load(Ordering::Acquire) && !failed {
-            if p.session.is_some() {
-                // Deliver what we have; `stop()` will report DeviceLost.
-                p.finish(true);
-                failed = true;
-            } else {
-                break;
-            }
+        let drops = dropped.load(Ordering::Relaxed);
+        if drops != reported_drops {
+            tracing::warn!("dropped {} audio callback buffers (worker too slow)", drops - reported_drops);
+            reported_drops = drops;
         }
-        if idle_since.is_some_and(|t| t.elapsed() >= WARM_FOR) {
+        if engine.poll() == Flow::Exit {
             break;
         }
     }
@@ -425,10 +519,67 @@ fn run_worker(ctx: WorkerCtx, ready: std::sync::mpsc::Sender<Result<(), Recorder
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc::{channel, sync_channel, TryRecvError};
 
     #[test]
     fn stream_error_maps_to_device_lost() {
         let e: cpal::Error = cpal::ErrorKind::DeviceNotAvailable.into();
         assert_eq!(map_stream_error(&e), RecorderError::DeviceLost);
+    }
+
+    #[test]
+    fn device_lost_then_cancel_then_start_reopens_or_errors() {
+        let lost = Arc::new(AtomicBool::new(false));
+        let (ltx, _lrx) = sync_channel(8);
+        let mut e = Engine::new(1, 16_000, ltx, lost.clone()).unwrap();
+        let (ftx, frx) = channel();
+        let (ack, ack_rx) = channel();
+        assert_eq!(e.on_cmd(Cmd::Start { frame_tx: ftx, ack }, &mut || None), Flow::Continue);
+        ack_rx.recv().unwrap();
+        e.feed(&vec![0.1; 1600]);
+        lost.store(true, Ordering::Release);
+        assert_eq!(e.poll(), Flow::Continue);
+        assert!(frx.try_iter().count() > 0);
+        assert_eq!(frx.try_recv().unwrap_err(), TryRecvError::Disconnected);
+        // cancel after loss must close the worker, not linger
+        assert_eq!(e.on_cmd(Cmd::Cancel, &mut || None), Flow::Exit);
+
+        // a start on a failed worker must not ack (Recorder then reopens a fresh stream)
+        let (ftx2, _frx2) = channel();
+        let (ack2, ack2_rx) = channel();
+        assert_eq!(e.on_cmd(Cmd::Start { frame_tx: ftx2, ack: ack2 }, &mut || None), Flow::Exit);
+        assert!(ack2_rx.recv().is_err());
+    }
+
+    #[test]
+    fn stop_after_loss_reports_device_lost() {
+        let lost = Arc::new(AtomicBool::new(false));
+        let (ltx, _lrx) = sync_channel(8);
+        let mut e = Engine::new(1, 16_000, ltx, lost.clone()).unwrap();
+        let (ftx, _frx) = channel();
+        let (ack, _ack_rx) = channel();
+        e.on_cmd(Cmd::Start { frame_tx: ftx, ack }, &mut || None);
+        lost.store(true, Ordering::Release);
+        e.poll();
+        let (reply, reply_rx) = channel();
+        assert_eq!(e.on_cmd(Cmd::Stop { reply }, &mut || None), Flow::Exit);
+        assert_eq!(reply_rx.recv().unwrap().unwrap_err(), RecorderError::DeviceLost);
+    }
+
+    #[test]
+    fn preroll_not_redelivered_across_sessions() {
+        let lost = Arc::new(AtomicBool::new(false));
+        let (ltx, _lrx) = sync_channel(8);
+        let mut e = Engine::new(1, 16_000, ltx, lost).unwrap();
+        let (ftx, _frx) = channel();
+        let (ack, _a) = channel();
+        e.on_cmd(Cmd::Start { frame_tx: ftx, ack }, &mut || None);
+        e.feed(&vec![0.1; 16_000]);
+        let (reply, _r) = channel();
+        e.on_cmd(Cmd::Stop { reply }, &mut || None);
+        let (ftx, frx) = channel();
+        let (ack, _a) = channel();
+        e.on_cmd(Cmd::Start { frame_tx: ftx, ack }, &mut || None);
+        assert_eq!(frx.try_iter().count(), 0, "warm start with nothing since stop must send no pre-roll");
     }
 }

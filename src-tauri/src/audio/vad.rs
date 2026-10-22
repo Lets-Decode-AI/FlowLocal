@@ -10,13 +10,10 @@ const MIN_THRESHOLD: f32 = 0.01;
 const FLOOR_MULTIPLIER: f32 = 3.0;
 /// Initial noise-floor estimate before any audio has been seen.
 const SEED_FLOOR: f32 = 0.003;
-/// The noise floor never exceeds this, so sustained speech cannot raise the threshold
-/// past quiet speech.
-const MAX_FLOOR: f32 = 0.01;
-/// Rolling window of recent frame RMS values used for the online floor (~2 s).
-const WINDOW_FRAMES: usize = 100;
-/// Seed entries (~0.5 s) that age out as real frames arrive.
-const SEED_FRAMES: usize = 25;
+/// The noise floor is the minimum frame RMS over this many frames (10 s): it falls to
+/// quieter frames immediately and rises only as old, quieter frames age out of the window,
+/// so speech shorter than the window cannot lift it. The seed ages out the same way.
+const FLOOR_WINDOW_FRAMES: u64 = 500;
 /// Padding kept around detected speech by [`trim_silence`] (200 ms).
 const PAD_SAMPLES: usize = SAMPLE_RATE as usize / 5;
 
@@ -32,16 +29,38 @@ fn threshold(noise_floor: f32) -> f32 {
     (noise_floor * FLOOR_MULTIPLIER).max(MIN_THRESHOLD)
 }
 
-/// 10th percentile of `values` (sorts in place).
-fn percentile_10(values: &mut [f32]) -> f32 {
-    values.sort_by(|a, b| a.total_cmp(b));
-    values[values.len() / 10]
+/// Asymmetric noise-floor tracker (sliding-window minimum), shared by the online
+/// classifier and the batch trimmer.
+struct NoiseTracker {
+    frame: u64,
+    /// Monotonic deque of (frame index, rms), increasing in rms.
+    mins: VecDeque<(u64, f32)>,
 }
 
-/// Adaptive speech/silence classifier for 20 ms frames. The noise floor is the 10th
-/// percentile of the last ~2 s of frame RMS values.
+impl NoiseTracker {
+    fn new() -> Self {
+        Self { frame: 0, mins: VecDeque::from([(0, SEED_FLOOR)]) }
+    }
+
+    fn floor(&self) -> f32 {
+        self.mins.front().map_or(SEED_FLOOR, |m| m.1)
+    }
+
+    fn observe(&mut self, level: f32) {
+        self.frame += 1;
+        while self.mins.back().is_some_and(|m| m.1 >= level) {
+            self.mins.pop_back();
+        }
+        self.mins.push_back((self.frame, level));
+        while self.mins.front().is_some_and(|m| m.0 + FLOOR_WINDOW_FRAMES <= self.frame) {
+            self.mins.pop_front();
+        }
+    }
+}
+
+/// Adaptive speech/silence classifier for 20 ms frames.
 pub struct FrameClassifier {
-    window: VecDeque<f32>,
+    tracker: NoiseTracker,
 }
 
 impl Default for FrameClassifier {
@@ -52,39 +71,35 @@ impl Default for FrameClassifier {
 
 impl FrameClassifier {
     pub fn new() -> Self {
-        Self { window: std::iter::repeat_n(SEED_FLOOR, SEED_FRAMES).collect() }
+        Self { tracker: NoiseTracker::new() }
     }
 
     /// Current noise-floor estimate.
     pub fn noise_floor(&self) -> f32 {
-        let mut v: Vec<f32> = self.window.iter().copied().collect();
-        percentile_10(&mut v).min(MAX_FLOOR)
+        self.tracker.floor()
     }
 
     /// Classify one frame, then fold it into the noise-floor estimate.
     pub fn is_speech(&mut self, frame: &[f32]) -> bool {
         let level = rms(frame);
-        let speech = level > threshold(self.noise_floor());
-        if self.window.len() == WINDOW_FRAMES {
-            self.window.pop_front();
-        }
-        self.window.push_back(level.min(MAX_FLOOR));
+        let speech = level > threshold(self.tracker.floor());
+        self.tracker.observe(level);
         speech
     }
 }
 
+/// Per-frame speech flags for a clip, using exactly the online classifier.
+pub fn speech_flags(samples: &[f32]) -> Vec<bool> {
+    let mut c = FrameClassifier::new();
+    samples.chunks_exact(FRAME_LEN).map(|f| c.is_speech(f)).collect()
+}
+
 /// Trim leading/trailing non-speech (keeping 200 ms padding). `None` when no frame
-/// exceeds the adaptive threshold.
+/// is classified as speech.
 pub fn trim_silence(samples: &[f32]) -> Option<&[f32]> {
-    let levels: Vec<f32> = samples.chunks_exact(FRAME_LEN).map(rms).collect();
-    if levels.is_empty() {
-        return None;
-    }
-    let mut sorted = levels.clone();
-    let floor = percentile_10(&mut sorted).min(MAX_FLOOR);
-    let thr = threshold(floor);
-    let first = levels.iter().position(|&l| l > thr)?;
-    let last = levels.iter().rposition(|&l| l > thr)?;
+    let flags = speech_flags(samples);
+    let first = flags.iter().position(|&f| f)?;
+    let last = flags.iter().rposition(|&f| f)?;
     let start = (first * FRAME_LEN).saturating_sub(PAD_SAMPLES);
     let end = ((last + 1) * FRAME_LEN + PAD_SAMPLES).min(samples.len());
     Some(&samples[start..end])
@@ -145,5 +160,69 @@ mod tests {
         let online: usize = s.chunks_exact(FRAME_LEN).filter(|f| c.is_speech(f)).count();
         assert!(online >= 45 && online <= 55, "online speech frames {online}");
         assert!(trim_silence(&s).is_some());
+    }
+
+    /// Speech-like signal: 4 Hz amplitude-modulated 200 Hz tone with the given RMS.
+    fn speechlike(secs: f32, rms_target: f32) -> Vec<f32> {
+        (0..(16_000.0 * secs) as usize)
+            .map(|i| {
+                let t = i as f32 / 16_000.0;
+                let env = 1.0 + 0.3 * (2.0 * std::f32::consts::PI * 4.0 * t).sin();
+                rms_target * 2f32.sqrt() * env * (2.0 * std::f32::consts::PI * 200.0 * t).sin()
+            })
+            .collect()
+    }
+
+    fn longest_false_run(flags: &[bool]) -> usize {
+        let (mut best, mut cur) = (0, 0);
+        for &f in flags {
+            cur = if f { 0 } else { cur + 1 };
+            best = best.max(cur);
+        }
+        best
+    }
+
+    #[test]
+    fn quiet_continuous_speech_no_false_pause() {
+        let mut s = noise(0.2, 0.002 * 3f32.sqrt());
+        s.extend(speechlike(8.0, 0.02));
+        let flags = speech_flags(&s);
+        let after = &flags[25..]; // skip first 0.5 s
+        assert!(longest_false_run(after) * 20 < 300, "false pause {} ms", longest_false_run(after) * 20);
+    }
+
+    #[test]
+    fn loud_room_pauses_detected() {
+        let amp = 0.05 * 3f32.sqrt(); // uniform noise: rms = amp / sqrt(3)
+        let mut s = noise(11.0, amp); // let the floor settle
+        let mut gaps = Vec::new();
+        for _ in 0..4 {
+            let burst: Vec<f32> = speechlike(1.0, 0.3);
+            let n = noise(1.0, amp);
+            s.extend(burst.iter().zip(&n).map(|(a, b)| a + b));
+            gaps.push(s.len() / FRAME_LEN + 3); // skip transition frames
+            s.extend(noise(0.5, amp));
+        }
+        let flags = speech_flags(&s);
+        for g in gaps {
+            assert!(flags[g..g + 20].iter().all(|f| !f), "gap at frame {g} classified as speech");
+        }
+        assert!(flags[11 * 50 + 10..11 * 50 + 40].iter().all(|f| *f), "burst not speech");
+    }
+
+    #[test]
+    fn classifier_matches_trim_frame_by_frame() {
+        let mut s = noise(1.0, 0.004);
+        s.extend(speechlike(1.5, 0.1));
+        s.extend(noise(1.0, 0.004));
+        let mut c = FrameClassifier::new();
+        let flags: Vec<bool> = s.chunks_exact(FRAME_LEN).map(|f| c.is_speech(f)).collect();
+        assert_eq!(flags, speech_flags(&s));
+        let first = flags.iter().position(|&f| f).unwrap();
+        let last = flags.iter().rposition(|&f| f).unwrap();
+        let t = trim_silence(&s).unwrap();
+        let start = (first * FRAME_LEN).saturating_sub(3200);
+        let end = ((last + 1) * FRAME_LEN + 3200).min(s.len());
+        assert_eq!(t.len(), end - start);
     }
 }

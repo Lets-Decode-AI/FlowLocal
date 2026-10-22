@@ -3,7 +3,7 @@
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Fft, FixedSync, Indexing, Resampler};
 
-use super::SAMPLE_RATE;
+use super::{RecorderError, SAMPLE_RATE};
 
 /// Incremental downmix + resample to 16 kHz mono. Feeding a signal in any number of
 /// pieces then calling [`flush`](Self::flush) yields the same samples as one batch call.
@@ -23,19 +23,24 @@ pub struct StreamResampler {
 }
 
 impl StreamResampler {
-    pub fn new(channels: u16, rate: u32) -> Self {
+    pub fn new(channels: u16, rate: u32) -> Result<Self, RecorderError> {
+        if rate == 0 {
+            return Err(RecorderError::Other("invalid input sample rate 0".into()));
+        }
         let channels = channels.max(1) as usize;
-        let rs = if rate == SAMPLE_RATE || rate == 0 {
+        let rs = if rate == SAMPLE_RATE {
             None
         } else {
             let chunk = (rate as usize / 50).max(64);
-            Fft::<f32>::new(rate as usize, SAMPLE_RATE as usize, chunk, 1, FixedSync::Input).ok()
+            let r = Fft::<f32>::new(rate as usize, SAMPLE_RATE as usize, chunk, 1, FixedSync::Input)
+                .map_err(|e| RecorderError::Other(format!("resampler setup failed: {e}")))?;
+            Some(r)
         };
         let (skip, out_buf) = match &rs {
             Some(r) => (r.output_delay(), vec![0.0; r.output_frames_max()]),
             None => (0, Vec::new()),
         };
-        Self {
+        Ok(Self {
             channels,
             rate,
             rs,
@@ -45,7 +50,7 @@ impl StreamResampler {
             skip,
             in_total: 0,
             out_total: 0,
-        }
+        })
     }
 
     fn downmix(&mut self, input: &[f32]) -> Vec<f32> {
@@ -63,62 +68,72 @@ impl StreamResampler {
     }
 
     /// Run one resampler chunk; `partial` = number of valid frames when padding.
-    fn run_chunk(&mut self, partial: Option<usize>, out: &mut Vec<f32>) {
-        let Some(rs) = self.rs.as_mut() else { return };
+    /// Input is only consumed when processing succeeds.
+    fn run_chunk(&mut self, partial: Option<usize>, out: &mut Vec<f32>) -> Result<(), RecorderError> {
+        let Some(rs) = self.rs.as_mut() else { return Ok(()) };
         let need = rs.input_frames_next();
         let mut chunk = vec![0.0f32; need];
         let take = partial.unwrap_or(need).min(self.pending.len());
         chunk[..take].copy_from_slice(&self.pending[..take]);
-        let consumed = partial.map_or(need, |_| take);
-        self.pending.drain(..consumed);
-        let input = InterleavedSlice::new(&chunk, 1, need).expect("input adapter");
+        let input = InterleavedSlice::new(&chunk, 1, need)
+            .map_err(|e| RecorderError::Other(format!("resampler input: {e}")))?;
         let max = self.out_buf.len();
-        let mut output = InterleavedSlice::new_mut(&mut self.out_buf, 1, max).expect("output adapter");
+        let mut output = InterleavedSlice::new_mut(&mut self.out_buf, 1, max)
+            .map_err(|e| RecorderError::Other(format!("resampler output: {e}")))?;
         let indexing = partial.map(|n| Indexing::new().partial_len(n));
-        let Ok((_, n_out)) = rs.process_into_buffer(&input, &mut output, indexing.as_ref()) else {
-            return;
-        };
+        let (_, n_out) = rs
+            .process_into_buffer(&input, &mut output, indexing.as_ref())
+            .map_err(|e| RecorderError::Other(format!("resampling failed: {e}")))?;
+        self.pending.drain(..if partial.is_some() { take } else { need });
         let start = self.skip.min(n_out);
         self.skip -= start;
         out.extend_from_slice(&self.out_buf[start..n_out]);
+        Ok(())
     }
 
     /// Feed interleaved input; returns whatever 16 kHz mono output is ready.
-    pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
+    pub fn process(&mut self, input: &[f32]) -> Result<Vec<f32>, RecorderError> {
         let mono = self.downmix(input);
         if self.rs.is_none() {
-            return mono;
+            return Ok(mono);
         }
         self.in_total += mono.len() as u64;
         self.pending.extend_from_slice(&mono);
         let mut out = Vec::new();
         while self.rs.as_ref().is_some_and(|r| self.pending.len() >= r.input_frames_next()) {
-            self.run_chunk(None, &mut out);
+            if let Err(e) = self.run_chunk(None, &mut out) {
+                self.out_total += out.len() as u64;
+                return Err(e);
+            }
         }
         self.out_total += out.len() as u64;
-        out
+        Ok(out)
     }
 
     /// Emit the remaining tail (including the resampler delay) and reset for reuse.
-    pub fn flush(&mut self) -> Vec<f32> {
+    pub fn flush(&mut self) -> Result<Vec<f32>, RecorderError> {
         let mut out = Vec::new();
-        if self.rs.is_some() {
-            let expected =
-                (self.in_total as f64 * SAMPLE_RATE as f64 / self.rate as f64).round() as u64;
-            if !self.pending.is_empty() {
-                let n = self.pending.len();
-                self.run_chunk(Some(n), &mut out);
-            }
-            let mut guard = 0;
-            while self.out_total + (out.len() as u64) < expected && guard < 8 {
-                self.run_chunk(Some(0), &mut out);
-                guard += 1;
-            }
-            let room = expected.saturating_sub(self.out_total) as usize;
-            out.truncate(room);
-        }
+        let result = self.flush_inner(&mut out);
         self.reset();
-        out
+        result.map(|_| out)
+    }
+
+    fn flush_inner(&mut self, out: &mut Vec<f32>) -> Result<(), RecorderError> {
+        if self.rs.is_none() {
+            return Ok(());
+        }
+        let expected = (self.in_total as f64 * SAMPLE_RATE as f64 / self.rate as f64).round() as u64;
+        if !self.pending.is_empty() {
+            let n = self.pending.len();
+            self.run_chunk(Some(n), out)?;
+        }
+        let mut guard = 0;
+        while self.out_total + (out.len() as u64) < expected && guard < 8 {
+            self.run_chunk(Some(0), out)?;
+            guard += 1;
+        }
+        out.truncate(expected.saturating_sub(self.out_total) as usize);
+        Ok(())
     }
 
     fn reset(&mut self) {
@@ -134,11 +149,18 @@ impl StreamResampler {
 }
 
 /// Downmix (channel average) and resample a whole buffer to 16 kHz mono.
+/// Only an invalid sample rate can fail; that is logged and yields an empty buffer.
 pub fn to_mono_16k(input: &[f32], channels: u16, rate: u32) -> Vec<f32> {
-    let mut r = StreamResampler::new(channels, rate);
-    let mut out = r.process(input);
-    out.extend(r.flush());
-    out
+    let run = || -> Result<Vec<f32>, RecorderError> {
+        let mut r = StreamResampler::new(channels, rate)?;
+        let mut out = r.process(input)?;
+        out.extend(r.flush()?);
+        Ok(out)
+    };
+    run().unwrap_or_else(|e| {
+        tracing::warn!("to_mono_16k failed: {e}");
+        Vec::new()
+    })
 }
 
 #[cfg(test)]
@@ -174,6 +196,11 @@ mod tests {
     }
 
     #[test]
+    fn invalid_rate_is_error() {
+        assert!(StreamResampler::new(1, 0).is_err());
+    }
+
+    #[test]
     fn passthrough_when_16k_mono() {
         let input = tone(300.0, 16_000, 0.1, 1);
         assert_eq!(to_mono_16k(&input, 1, 16_000), input);
@@ -183,13 +210,13 @@ mod tests {
     fn stream_resampler_matches_batch() {
         let input = tone(440.0, 48_000, 1.0, 1);
         let batch = to_mono_16k(&input, 1, 48_000);
-        let mut r = StreamResampler::new(1, 48_000);
+        let mut r = StreamResampler::new(1, 48_000).unwrap();
         let mut out = Vec::new();
         let cuts = [0usize, 1000, 5000, 5001, 20_000, 31_337, 40_000, input.len()];
         for w in cuts.windows(2) {
-            out.extend(r.process(&input[w[0]..w[1]]));
+            out.extend(r.process(&input[w[0]..w[1]]).unwrap());
         }
-        out.extend(r.flush());
+        out.extend(r.flush().unwrap());
         assert_eq!(out.len(), batch.len());
         let mse: f32 =
             out.iter().zip(&batch).map(|(a, b)| (a - b) * (a - b)).sum::<f32>() / out.len() as f32;
