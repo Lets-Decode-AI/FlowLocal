@@ -276,4 +276,21 @@ mod tests {
         assert!(emitted <= 11, "emitted {emitted}");
         assert!(emitted >= 10, "emitted {emitted}");
     }
+
+    #[tokio::test]
+    async fn range_ignored_200_restarts_part() {
+        let server = MockServer::start().await;
+        let data = body(100_000);
+        Mock::given(method("GET")).and(path("/f.bin"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone()))
+            .mount(&server).await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("f.bin");
+        std::fs::write(dir.path().join("f.bin.part"), vec![0xAAu8; 50_000]).unwrap();
+        download_file(
+            &HfClient::new(None), &format!("{}/f.bin", server.uri()), &dest,
+            &sha(&data), data.len() as u64, CancellationToken::new(), |_| {},
+        ).await.unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), data);
+    }
 }
