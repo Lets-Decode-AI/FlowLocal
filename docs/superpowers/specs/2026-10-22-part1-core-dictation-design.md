@@ -43,6 +43,8 @@ spec → plan → build cycle:
   VS Code and Slack, and the user's clipboard is restored afterwards.
 - Parakeet TDT 0.6B v2 transcription of a ~5 s utterance completes in < 500 ms
   on Apple Silicon.
+- For a 60 s dictation, text is inserted < 1 s after key-up on Apple Silicon
+  (streaming chunks; perceived speed far faster than transcribing 60 s at once).
 - Idle RAM (tray-only, model unloaded) < 60 MB; installer < 25 MB (excluding models).
 - A fresh install reaches first dictation with only in-app steps
   (permissions + one-click model download).
@@ -95,6 +97,11 @@ Windows (Tauri webviews)
   Bindings come from settings and are hot-reloadable.
 - `audio::Recorder`: `start()`, `stop() -> Vec<f32>` (16 kHz mono), `cancel()`;
   emits `level(f32)` at ~30 Hz while recording.
+- `stt::ChunkPlanner` (pure): `push(frames) -> Vec<Chunk>`, `finish() -> Option<Chunk>`;
+  decides chunk boundaries at pauses (see §5).
+- `stt::SttSession`: per-dictation handle on the worker; `feed(chunk)` queues a
+  chunk for in-order background transcription, `finish(tail) -> String` awaits
+  all chunks and returns the joined text, `cancel()` drops queued work.
 - `stt::SttEngine` (trait): `load(model: &InstalledModel) -> Result<()>`,
   `transcribe(samples: &[f32]) -> Result<String>`, `unload()`. One
   implementation (`SherpaEngine`) dispatching on engine kind: `Transducer`
@@ -201,13 +208,25 @@ is unit-testable without audio, models or OS hooks.
 
 ### Pipeline
 
-1. Key down → recorder starts (ring buffer keeps 300 ms pre-roll).
-2. Key up → stop; trim leading/trailing silence via VAD; send to STT thread.
-3. Post-process: whitespace and capitalization fixes, leading-space logic,
+1. Key down → recorder starts (ring buffer keeps 300 ms pre-roll) and streams
+   16 kHz frames to a **chunk planner** while the user is still speaking.
+2. **Streaming chunked transcription:** the planner cuts the live audio into
+   chunks at natural pauses (≥ 300 ms of silence once a chunk is ≥ 4 s long;
+   forced cut at the quietest 20 ms frame in the last 3 s if a chunk reaches
+   15 s). Each completed chunk is sent immediately to the STT worker, which
+   transcribes chunks **sequentially in order** in the background while
+   recording continues. All-silent chunks are skipped.
+3. Key up → only the final tail chunk (≤ 15 s, usually a few seconds) remains;
+   it is trimmed and transcribed, and chunk texts are joined in order
+   (lower-casing a chunk's first letter when the previous chunk did not end
+   a sentence). Perceived latency after key-up is therefore bounded by one
+   short chunk, independent of total dictation length. If no chunk contained
+   speech, the dictation is discarded.
+4. Post-process: whitespace and capitalization fixes, leading-space logic,
    personal dictionary replacements (case-insensitive whole-word).
-4. Insert: record frontmost app → save clipboard → write text → synthetic
+5. Insert: record frontmost app → save clipboard → write text → synthetic
    ⌘V / Ctrl+V → restore clipboard after ~150 ms.
-5. Persist: transcript text, raw text, app name, timestamp, audio duration, word
+6. Persist: transcript text, raw text, app name, timestamp, audio duration, word
    count, WPM, model id.
 
 ### Flow Bar
@@ -257,7 +276,8 @@ Schema migrations via a simple versioned migration table.
 
 ## 9. Testing
 
-- **Rust unit tests:** dictation state machine (fake engine / inserter / clock),
+- **Rust unit tests:** chunk planner boundaries, in-order session joining,
+  dictation state machine (fake engine / inserter / clock),
   downloader resume + checksum (local test HTTP server), catalog parsing, HF repo
   engine detection, post-processing, resample + VAD trim.
 - **Integration test:** real Parakeet model on bundled WAV fixtures; assert WER

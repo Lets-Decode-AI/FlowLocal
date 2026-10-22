@@ -17,6 +17,7 @@
 - Idle RAM (tray-only, model unloaded) < 60 MB; installer < 25 MB excluding models.
 - Parakeet TDT 0.6B v2 transcription of a ~5 s utterance < 500 ms on Apple Silicon.
 - Default model: Parakeet TDT 0.6B v2 int8 (`csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8`), `model_type = "nemo_transducer"`.
+- Streaming chunked STT: chunks cut at pauses ≥ 300 ms once ≥ 4 s long; forced cut at quietest 20 ms frame in last 3 s at 15 s; chunks transcribed sequentially in order during recording; 60 s dictation inserted < 1 s after key-up on Apple Silicon.
 - Audio fed to STT: 16 000 Hz mono f32. Pre-roll 300 ms. Taps < 250 ms discarded. Hands-free auto-stop at 6 min.
 - Clipboard restore delay ~150 ms after synthetic paste.
 - Model idle unload default 10 min (configurable, "never" allowed).
@@ -28,7 +29,7 @@
 
 ## Review Focus
 
-1. **Long hands-free recordings (up to 6 min)** — offline transducers degrade or OOM on very long input; expected: full text returned. Pinned in Task 6 by splitting audio > 30 s at silence boundaries (`split_for_stt`) with a test.
+1. **Long hands-free recordings (up to 6 min)** — offline transducers degrade or OOM on very long input; expected: full text returned. Pinned in Task 6 by streaming chunking (`ChunkPlanner` never emits a chunk > 15 s; `six_minute_stream_yields_ordered_chunks_le_15s`).
 2. **Paths with spaces / non-ASCII** (this repo's path has a space; usernames can be non-ASCII) — model paths go through C strings; expected: model loads. Pinned in Task 6 (`catalog_paths_with_spaces_and_unicode`) and Task 5 (download into such a dir).
 3. **Non-text clipboard contents** (user had an image copied) — expected: restored after dictation, not wiped. Pinned in Task 9 (`ClipboardSnapshot` captures text and image; test with fake clipboard).
 4. **Hotkey pressed again while Transcribing/Inserting** — expected: new recording starts immediately; earlier result still inserts, in order. Pinned in Task 11 (`press_during_transcribing_starts_new_recording`).
@@ -179,22 +180,26 @@ Catalog ids: `parakeet-v2`, `parakeet-v3`, `moonshine-base`, `whisper-tiny-en`, 
 ### Task 6: STT engine & worker thread
 
 **Files:**
-- Create: `stt/mod.rs`, `stt/sherpa.rs`, `stt/worker.rs`, `stt/split.rs`, `src-tauri/tests/stt_integration.rs`, `tests/fixtures/*.wav` (+ `fixtures/expected.json`)
+- Create: `stt/mod.rs`, `stt/sherpa.rs`, `stt/worker.rs`, `stt/chunker.rs`, `stt/session.rs`, `src-tauri/tests/stt_integration.rs`, `tests/fixtures/*.wav` (+ `fixtures/expected.json`)
 
 **Interfaces:**
 - Consumes: `InstalledModel`, `EngineKind` (Tasks 3, 5)
 - Produces:
   - `trait SttEngine: Send { fn load(&mut self, m: &InstalledModel) -> Result<()>; fn transcribe(&mut self, samples: &[f32]) -> Result<String>; fn unload(&mut self); fn loaded_id(&self) -> Option<&str>; }`
   - `SherpaEngine` — dispatches on `EngineKind` to `sherpa_rs::{transducer::TransducerRecognizer (model_type "nemo_transducer"), whisper::WhisperRecognizer, moonshine::MoonshineRecognizer, sense_voice::SenseVoiceRecognizer}`; `num_threads = min(cores, 4)`; provider `"coreml"` on Apple Silicon when transducer load succeeds with it, else `"cpu"`.
-  - `split_for_stt(samples: &[f32], max_secs: f32 /*30*/) -> Vec<&[f32]>` — cut at lowest-energy 20 ms frame in the last 5 s of each window
-  - `SttWorker::spawn(engine: Box<dyn SttEngine>, idle_unload: Option<Duration>) -> SttHandle`; `SttHandle` (Clone): `async transcribe(model: InstalledModel, samples: Vec<f32>) -> Result<String>` (loads/swaps if needed, joins chunks with a space), `async preload(model)`, `set_idle_unload(Option<Duration>)`. Panics caught with `catch_unwind`; one automatic reload then `Err(SttError::EngineFailed)`.
+  - `struct Chunk { samples: Vec<f32>, has_speech: bool, start_ms: u64 }`
+  - `struct ChunkerConfig { min_secs: f32 /*4*/, pause_ms: u32 /*300*/, max_secs: f32 /*15*/, search_back_secs: f32 /*3*/ }` (`Default`)
+  - `ChunkPlanner` (pure, `chunker.rs`): `new(cfg)`, `push(&mut self, frames: &[f32]) -> Vec<Chunk>` (any number of completed chunks), `finish(&mut self) -> Option<Chunk>` (remaining tail, trimmed with `audio::vad::trim_silence`; `None` if empty), `any_speech(&self) -> bool`. Speech/silence per 20 ms frame uses the same adaptive RMS threshold as `trim_silence` (expose `audio::vad::FrameClassifier`). A cut at a pause lands in the middle of the pause.
+  - `join_chunks(texts: &[String]) -> String` — trims each, skips empties, joins with one space; lower-cases a chunk's first letter when the previous text does not end in `.?!` and the letter starts a non-acronym word (next char lowercase).
+  - `SttWorker::spawn(engine: Box<dyn SttEngine>, idle_unload: Option<Duration>) -> SttHandle`; `SttHandle` (Clone): `session(&self, model: InstalledModel) -> SttSession` (begins loading the model immediately if not loaded), `async preload(model)`, `set_idle_unload(Option<Duration>)`. Panics caught with `catch_unwind`; one automatic reload then `Err(SttError::EngineFailed)`.
+  - `SttSession` (`session.rs`): `feed(&self, chunk: Chunk)` (non-blocking; queued FIFO on the worker; skipped if `!has_speech`); `async finish(self, tail: Option<Chunk>) -> Result<String>` (awaits all queued chunks in order + tail, returns `join_chunks`); `cancel(self)` (drops queued, not-yet-started chunks). Chunks of different sessions never interleave out of order: the worker processes one FIFO queue.
 
-- [ ] **Step 1: Failing unit tests** (fake engine) — `worker_loads_once_and_reuses`; `worker_swaps_on_model_change`; `worker_unloads_after_idle` (idle 50 ms); `panic_reloads_once_then_errors`; `split_short_audio_is_single_chunk`; `split_7min_audio_into_chunks_le_30s_at_quiet_points`.
+- [ ] **Step 1: Failing unit tests** (fake engine) — `worker_loads_once_and_reuses`; `worker_swaps_on_model_change`; `worker_unloads_after_idle` (idle 50 ms); `panic_reloads_once_then_errors`; `chunker_short_utterance_only_tail` (3 s speech → `push` yields nothing, `finish` yields one chunk); `chunker_cuts_at_pause_after_min` (5 s speech + 400 ms silence + 3 s speech → one chunk emitted ≈ 5.2 s, cut inside pause); `chunker_ignores_pause_before_min` (2 s speech + 400 ms pause + 2 s → no cut); `chunker_forces_cut_at_max_at_quietest_frame` (continuous 20 s tone with a dip at 13.5 s → first chunk ends at 13.5 s ± 20 ms, ≤ 15 s); `six_minute_stream_yields_ordered_chunks_le_15s` (pushed in 20 ms frames; concatenated chunks + tail == input length minus trimmed silence; every chunk ≤ 15 s); `silent_chunk_has_no_speech`; `join_chunks_lowercases_continuation` (`["So I went", "And then"]` → `"So I went and then"`; `["Done.", "Next"]` → `"Done. Next"`; `["Hi", "NASA rocks"]` keeps `NASA`); `session_transcribes_chunks_in_order_while_feeding` (fake engine with 50 ms delay; feed 3 chunks; `finish` returns texts in order; assert chunk 1 started before `finish` was called); `session_finish_latency_is_only_tail` (fake engine 100 ms per chunk; feed 5 chunks spaced 150 ms apart, then `finish(tail)` returns within 250 ms); `session_cancel_drops_pending`; `silent_chunks_not_sent_to_engine`.
 - [ ] **Step 2:** `cargo test stt::` → FAIL.
 - [ ] **Step 3:** Implement worker as `std::thread` + `std::sync::mpsc` command channel with `oneshot` replies.
 - [ ] **Step 4:** `cargo test stt::` → PASS.
-- [ ] **Step 5: Integration test** `parakeet_wer_below_threshold` — `#[ignore]` unless env `FLOWLOCAL_MODEL_DIR` set; loads `parakeet-v2` from that dir (place the dir under a path containing a space and `é` to cover `catalog_paths_with_spaces_and_unicode`); for each fixture WAV, WER vs expected < 0.08; also asserts a 5 s clip transcribes in < 500 ms on Apple Silicon. Fetch model once via the Manager (or `huggingface-cli`-free curl script `scripts/fetch_test_model.sh`). Run `FLOWLOCAL_MODEL_DIR=... cargo test --test stt_integration -- --ignored` → PASS.
-- [ ] **Step 6:** Commit `feat(stt): sherpa-onnx engine, worker thread, long-audio splitting`.
+- [ ] **Step 5: Integration test** `parakeet_wer_below_threshold` — `#[ignore]` unless env `FLOWLOCAL_MODEL_DIR` set; loads `parakeet-v2` from that dir (place the dir under a path containing a space and `é` to cover `catalog_paths_with_spaces_and_unicode`); for each fixture WAV, WER vs expected < 0.08; asserts a 5 s clip transcribes in < 500 ms on Apple Silicon; `streaming_60s_finish_under_1s` — concatenate fixtures to ~60 s, feed through `ChunkPlanner` + `SttSession` at real-time pace (20 ms frames with sleeps), assert `finish` returns < 1 s after the last frame and WER of the streamed result < 0.10. Fetch model once via the Manager (or `huggingface-cli`-free curl script `scripts/fetch_test_model.sh`). Run `FLOWLOCAL_MODEL_DIR=... cargo test --test stt_integration -- --ignored` → PASS.
+- [ ] **Step 6:** Commit `feat(stt): sherpa-onnx engine, worker thread, streaming chunked sessions`.
 
 ### Task 7: Audio capture, resampling, VAD trim
 
@@ -205,11 +210,13 @@ Catalog ids: `parakeet-v2`, `parakeet-v3`, `moonshine-base`, `whisper-tiny-en`, 
 - Produces:
   - `to_mono_16k(input: &[f32], channels: u16, rate: u32) -> Vec<f32>` (rubato `FftFixedIn` or sinc; pass-through when already 16k mono)
   - `trim_silence(samples: &[f32]) -> Option<&[f32]>` — 20 ms frames, RMS threshold adaptive = max(0.01, noise_floor×3) where noise_floor = 10th-percentile frame RMS; keep 200 ms padding; `None` when no frame above threshold (no speech)
-  - `struct Recorder`: `new(device_name: Option<String>, level_tx: Sender<f32>) -> Result<Recorder>`; `start()`; `stop() -> Result<Vec<f32>, RecorderError>` (16 kHz mono, including 300 ms pre-roll); `cancel()`; `list_devices() -> Vec<String>`
+  - `struct StreamResampler` — stateful incremental version of `to_mono_16k` (`process(&mut self, input: &[f32]) -> Vec<f32>`, `flush()`), so live frames can be streamed
+  - `audio::vad::FrameClassifier` — the adaptive 20 ms speech/silence classifier shared by `trim_silence` and the Task 6 `ChunkPlanner` (`is_speech(&mut self, frame: &[f32]) -> bool`, noise floor updated online)
+  - `struct Recorder`: `new(device_name: Option<String>, level_tx: Sender<f32>) -> Result<Recorder>`; `start(frame_tx: std::sync::mpsc::Sender<Vec<f32>>)` — streams 16 kHz mono frames (~20 ms each, pre-roll sent first) to `frame_tx` from a non-audio thread; `stop() -> Result<RecordingStats, RecorderError>` (flushes the resampler, sends remaining frames, then drops `frame_tx`; `RecordingStats { duration_ms: u64 }`); `cancel()`; `list_devices() -> Vec<String>`
   - `enum RecorderError { NoDevice, PermissionDenied, DeviceLost, Other(String) }`
   - Stream stays open between dictations only while app is "warm" (recording within last 60 s) for pre-roll; otherwise closed to save power and to avoid the macOS mic indicator at rest. Pre-roll applies only when warm.
 
-- [ ] **Step 1: Failing tests** — `resample_48k_stereo_to_16k_mono_length` (1 s → 16000 ± 32 samples); `resample_preserves_440hz_tone` (dominant freq via zero crossings ≈ 440 ± 5); `trim_removes_leading_trailing_silence` (0.5 s silence + 1 s tone + 0.5 s silence → 1.4 s ± 0.05); `trim_returns_none_for_silence_and_low_noise`; `stream_error_maps_to_device_lost` (feed cpal `StreamError::DeviceNotAvailable` into the error mapper fn `map_stream_error`).
+- [ ] **Step 1: Failing tests** — `resample_48k_stereo_to_16k_mono_length` (1 s → 16000 ± 32 samples); `resample_preserves_440hz_tone` (dominant freq via zero crossings ≈ 440 ± 5); `trim_removes_leading_trailing_silence` (0.5 s silence + 1 s tone + 0.5 s silence → 1.4 s ± 0.05); `trim_returns_none_for_silence_and_low_noise`; `stream_resampler_matches_batch` (48 kHz input fed in 7 uneven pieces == `to_mono_16k` of the whole within 1e-3 RMS); `frame_classifier_separates_tone_from_noise`; `stream_error_maps_to_device_lost` (feed cpal `StreamError::DeviceNotAvailable` into the error mapper fn `map_stream_error`).
 - [ ] **Step 2:** `cargo test audio::` → FAIL.
 - [ ] **Step 3:** Implement; level events = RMS per ~33 ms, sent with `try_send` (never block audio thread).
 - [ ] **Step 4:** `cargo test audio::` → PASS. Manual: temporary `examples/record.rs` records 3 s, writes WAV, play back.
@@ -276,16 +283,17 @@ Catalog ids: `parakeet-v2`, `parakeet-v3`, `moonshine-base`, `whisper-tiny-en`, 
 - Create: `dictation/machine.rs`, `dictation/mod.rs`, `events.rs`
 
 **Interfaces:**
-- Consumes: `HotkeyEvent` (T10), `Recorder`/`RecorderError` (T7), `SttHandle` (T6), `Inserter` (T9), `postprocess` (T8), `Store` (T2), `Manager::active()` (T5)
+- Consumes: `HotkeyEvent` (T10), `Recorder`/`RecorderError` (T7), `SttHandle`/`SttSession`/`ChunkPlanner` (T6), `Inserter` (T9), `postprocess` (T8), `Store` (T2), `Manager::active()` (T5)
 - Produces:
   - `enum State { Idle, Recording { started: Instant, hands_free: bool }, Transcribing, Inserting, Error(String) }` (serde for UI as `{kind, message?}`)
   - `machine::step(state, input: Input, now) -> (State, Vec<Effect>)` (pure). `Input` = `Hotkey(HotkeyEvent) | RecorderFailed(RecorderError) | Transcribed(Result<String>) | Inserted(InsertOutcome) | Tick`; `Effect` = `StartRecording | StopRecording | CancelRecording | Transcribe | Insert(String) | Persist | ShowError(String) | ArmEsc(bool) | Emit(State)`.
   - Rules: Pressed in Idle/Transcribing/Inserting → Recording (pipeline of the previous utterance continues; results inserted in order via a FIFO queue in the controller); Released < 250 ms → Idle (cancel); DoubleTap → Recording{hands_free:true}; Pressed while hands_free → stop & Transcribe; Tick with hands_free and elapsed ≥ 6 min → stop & Transcribe; Cancel → Idle; any failure → Error, then Tick after 2 s → Idle; no active model on Pressed → Error("No model installed").
+  - Streaming: on `StartRecording` the controller opens `SttSession` for the active model and a `ChunkPlanner`; a pump task drains recorder frames → `planner.push` → `session.feed` for each chunk during recording. On `StopRecording` it calls `planner.finish()`; if `!planner.any_speech()` → discard (Idle), else `session.finish(tail)` → `Transcribed`. Cancel → `session.cancel()`.
   - `Controller::spawn(deps: ControllerDeps) -> ControllerHandle` (tokio task); `ControllerHandle::set_paused(bool)`; emits Tauri event `dictation://state` and `dictation://level` (f32) via `deps.emit`.
   - Persist: `NewTranscript { text, raw_text, app_name: frontmost_app_name() captured at key-down, duration_ms, word_count = text.split_whitespace().count(), wpm = words / (duration_ms/60000), model_id }`.
 - `events.rs`: consts `STATE = "dictation://state"`, `LEVEL = "dictation://level"`, `DL_PROGRESS = "models://progress"`, `TOAST = "app://toast"`, `TRANSCRIPT_ADDED = "history://added"`.
 
-- [ ] **Step 1: Failing tests** (pure machine + controller with fakes) — `hold_speak_release_inserts_and_persists`; `short_tap_is_discarded`; `no_speech_is_discarded` (trim → None ⇒ Idle, nothing inserted); `double_tap_hands_free_then_press_stops`; `hands_free_auto_stops_at_6_min`; `cancel_discards`; `no_model_shows_error`; `press_during_transcribing_starts_new_recording` (both results inserted in order A, B); `recorder_error_goes_to_error_then_idle`; `copied_only_emits_toast_and_still_persists`; `paused_ignores_hotkeys`.
+- [ ] **Step 1: Failing tests** (pure machine + controller with fakes) — `hold_speak_release_inserts_and_persists`; `short_tap_is_discarded`; `no_speech_is_discarded` (planner `any_speech()==false` ⇒ Idle, nothing inserted); `chunks_fed_during_recording` (fake recorder streams 12 s with a pause at 6 s → fake session receives 1 chunk before Released); `double_tap_hands_free_then_press_stops`; `hands_free_auto_stops_at_6_min`; `cancel_discards`; `no_model_shows_error`; `press_during_transcribing_starts_new_recording` (both results inserted in order A, B); `recorder_error_goes_to_error_then_idle`; `copied_only_emits_toast_and_still_persists`; `paused_ignores_hotkeys`.
 - [ ] **Step 2–4:** fail → implement → pass (`cargo test dictation::`).
 - [ ] **Step 5:** Commit `feat(dictation): state machine and controller pipeline`.
 
