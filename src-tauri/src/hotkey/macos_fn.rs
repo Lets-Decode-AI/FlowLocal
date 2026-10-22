@@ -33,6 +33,7 @@ const MODIFIERS: [(i64, u64, Key); 8] = [
 ];
 
 /// Translate a flagsChanged event into (key, down).
+#[cfg(test)]
 fn from_flags_changed(keycode: i64, flags: u64) -> Option<(Key, bool)> {
     if keycode == 63 {
         return Some((Key::Fn, flags & FLAG_SECONDARY_FN != 0));
@@ -41,6 +42,14 @@ fn from_flags_changed(keycode: i64, flags: u64) -> Option<(Key, bool)> {
         .iter()
         .find(|(kc, _, _)| *kc == keycode)
         .map(|(_, bit, key)| (*key, flags & bit != 0))
+}
+
+/// Down-state of every modifier (and Fn) according to `flags`. Applied on
+/// each flagsChanged so a missed key-up cannot leave a modifier stuck.
+fn modifier_states(flags: u64) -> Vec<(Key, bool)> {
+    let mut v: Vec<_> = MODIFIERS.iter().map(|(_, bit, key)| (*key, flags & bit != 0)).collect();
+    v.push((Key::Fn, flags & FLAG_SECONDARY_FN != 0));
+    v
 }
 
 fn from_keycode(keycode: i64) -> Option<Key> {
@@ -76,7 +85,13 @@ fn run(core: Arc<Mutex<Core>>, stopped: Arc<AtomicBool>, ready: mpsc::Sender<Res
             }
             let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
             let mapped = match etype {
-                CGEventType::FlagsChanged => from_flags_changed(keycode, event.get_flags().bits()),
+                CGEventType::FlagsChanged => {
+                    let mut core = super::lock(&cb_core);
+                    for (key, down) in modifier_states(event.get_flags().bits()) {
+                        core.handle(key, down);
+                    }
+                    None
+                }
                 CGEventType::KeyDown => from_keycode(keycode).map(|k| (k, true)),
                 CGEventType::KeyUp => from_keycode(keycode).map(|k| (k, false)),
                 // The system disabled the tap; key-ups may have been missed.
@@ -126,5 +141,14 @@ mod tests {
         assert_eq!(from_flags_changed(61, 0x40), Some((Key::AltRight, true)));
         assert_eq!(from_flags_changed(58, 0x40), Some((Key::AltLeft, false)));
         assert_eq!(from_flags_changed(0, 0x40), None);
+    }
+
+    #[test]
+    fn flags_resync_releases_missed_modifier() {
+        let states = modifier_states(0x40);
+        assert!(states.contains(&(Key::AltRight, true)));
+        assert!(states.contains(&(Key::ControlLeft, false)));
+        assert!(states.contains(&(Key::Fn, false)));
+        assert_eq!(states.len(), 9);
     }
 }

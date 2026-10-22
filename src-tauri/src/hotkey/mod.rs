@@ -34,6 +34,8 @@ pub enum HotkeyError {
     TapUnavailable,
     #[error("global hotkeys are not supported on this platform/session")]
     Unsupported,
+    #[error("keyboard listener failed to start: {0}")]
+    ListenFailed(String),
     #[error("hotkey backend error: {0}")]
     Backend(String),
 }
@@ -104,12 +106,13 @@ pub struct Core {
     chord: ChordTracker,
     gesture: GestureDetector,
     pub armed: bool,
+    esc_down: bool,
     tx: Sender<HotkeyEvent>,
 }
 
 impl Core {
     pub fn new(binding: Binding, tx: Sender<HotkeyEvent>) -> Self {
-        Self { chord: ChordTracker::new(binding), gesture: GestureDetector::new(), armed: false, tx }
+        Self { chord: ChordTracker::new(binding), gesture: GestureDetector::new(), armed: false, esc_down: false, tx }
     }
 
     fn emit(&self, events: impl IntoIterator<Item = HotkeyEvent>) {
@@ -121,7 +124,11 @@ impl Core {
 
     pub fn handle(&mut self, key: Key, down: bool) {
         if key == Key::Escape && !self.chord.binding.keys.contains(&Key::Escape) {
-            if down && self.armed {
+            let first_down = down && !std::mem::replace(&mut self.esc_down, true);
+            if !down {
+                self.esc_down = false;
+            }
+            if first_down && self.armed {
                 self.emit([HotkeyEvent::Cancel]);
             }
             return;
@@ -181,10 +188,7 @@ impl HotkeyService {
         core: Arc<Mutex<Core>>,
         stopped: Arc<AtomicBool>,
     ) -> Result<(), HotkeyError> {
-        let wayland = cfg!(target_os = "linux")
-            && std::env::var_os("WAYLAND_DISPLAY").is_some()
-            && std::env::var_os("DISPLAY").is_none();
-        if wayland {
+        if crate::insert::is_wayland() {
             return portal::start(binding, tx);
         }
         rdev_backend::start(core, stopped)
@@ -250,6 +254,7 @@ mod tests {
         let mut core = Core::new(Binding { keys: vec![Key::Fn] }, tx);
         core.handle(Key::Escape, true);
         assert!(rx.try_recv().is_err());
+        core.handle(Key::Escape, false);
         core.armed = true;
         core.handle(Key::Escape, true);
         assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Cancel);
@@ -263,5 +268,29 @@ mod tests {
         assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Pressed);
         core.set_binding(Binding { keys: vec![Key::AltRight] });
         assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Released);
+    }
+
+    #[test]
+    fn held_esc_cancels_once() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut core = Core::new(Binding { keys: vec![Key::Fn] }, tx);
+        core.armed = true;
+        core.handle(Key::Escape, true);
+        core.handle(Key::Escape, true);
+        core.handle(Key::Escape, true);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Cancel);
+        assert!(rx.try_recv().is_err());
+        core.handle(Key::Escape, false);
+        core.handle(Key::Escape, true);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Cancel);
+    }
+
+    #[test]
+    fn wayland_with_xwayland_display_is_wayland() {
+        // XWayland sessions also set DISPLAY; only the Wayland vars matter.
+        assert!(crate::insert::detect_wayland(Some("wayland-0"), None));
+        assert!(crate::insert::detect_wayland(None, Some("wayland")));
+        assert!(!crate::insert::detect_wayland(None, Some("x11")));
+        assert!(!crate::insert::detect_wayland(None, None));
     }
 }

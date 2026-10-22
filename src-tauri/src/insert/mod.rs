@@ -12,7 +12,7 @@ use crate::postprocess::InsertContext;
 use clipboard::{Clipboard, ClipboardSnapshot, SystemClipboard};
 use keystroke::{EnigoKeystroke, Keystroke};
 
-pub use frontmost::{frontmost_app_name, is_wayland, secure_input_active};
+pub use frontmost::{detect_wayland, frontmost_app_name, is_wayland, secure_input_active};
 
 /// Delay between the synthetic paste and restoring the previous clipboard.
 pub const RESTORE_DELAY: Duration = Duration::from_millis(150);

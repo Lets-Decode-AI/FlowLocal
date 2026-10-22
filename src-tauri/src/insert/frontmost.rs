@@ -12,12 +12,20 @@ pub fn secure_input_active() -> bool {
     imp::secure_input_active()
 }
 
+/// Pure Wayland detection. `DISPLAY` is deliberately ignored: XWayland sets
+/// it on Wayland desktops too.
+pub fn detect_wayland(wayland_display: Option<&str>, session_type: Option<&str>) -> bool {
+    wayland_display.is_some() || session_type == Some("wayland")
+}
+
 /// Linux Wayland session (synthetic paste is unreliable there).
 pub fn is_wayland() -> bool {
     #[cfg(target_os = "linux")]
     {
-        std::env::var_os("WAYLAND_DISPLAY").is_some()
-            || std::env::var("XDG_SESSION_TYPE").is_ok_and(|v| v == "wayland")
+        detect_wayland(
+            std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+            std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+        )
     }
     #[cfg(not(target_os = "linux"))]
     {
