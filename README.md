@@ -60,7 +60,7 @@ configured signing certificates). If macOS says the app "is damaged" or "cannot 
 the developer cannot be verified":
 
 1. Drag FlowLocal to `/Applications`.
-2. Right-click the app, choose **Open**, then **Open** again; or
+2. Try to open it once, then go to System Settings > Privacy & Security, scroll to the Security section and click **Open Anyway** (macOS 15 and later); or
 3. run `xattr -dr com.apple.quarantine /Applications/FlowLocal.app` in Terminal.
 
 FlowLocal needs two permissions, which onboarding walks you through (System Settings > Privacy & Security):
@@ -77,8 +77,9 @@ Run the installer. Windows SmartScreen may warn about an unrecognized publisher 
 ### Linux
 
 - **X11**: fully supported. Default hotkey is hold `Ctrl+Super`.
-- **Wayland**: best effort. Global hotkeys use the XDG GlobalShortcuts portal when your compositor provides it,
-  and synthetic paste is often blocked, in which case the text is left on the clipboard and you paste it yourself.
+- **Wayland**: the global hotkey is currently unavailable (the app shows a "Global hotkey unavailable on Wayland"
+  notice); use an X11 session for now. Where synthetic paste is blocked, the text is left on the clipboard and you paste it yourself.
+  Hotkey support via the XDG GlobalShortcuts portal is on the [Roadmap](#roadmap).
 - Make the AppImage executable (`chmod +x FlowLocal_*.AppImage`) or install the `.deb` with `sudo apt install ./FlowLocal_*.deb`.
 
 ## Supported models
@@ -95,7 +96,7 @@ from the app for other sherpa-onnx repos; compatible transducer, Whisper, Moonsh
 | Whisper tiny.en (int8) | Whisper | ~103 MB | English | 2 GB |
 | Whisper small.en (int8) | Whisper | ~375 MB | English | 3 GB |
 | SenseVoice small (int8) | SenseVoice | ~239 MB | Chinese, English, Japanese, Korean, Cantonese | 2 GB |
-| Whisper large-v3-turbo (int8) | Whisper | ~1 GB | 99 languages | 6 GB |
+| Whisper large-v3-turbo (int8) | Whisper | ~1 GB | Multilingual (35 languages listed in the catalog) | 6 GB |
 
 On first run FlowLocal recommends Moonshine Base on low-RAM machines, Parakeet v3 or SenseVoice for matching
 system locales, and Parakeet v2 otherwise.
@@ -104,7 +105,7 @@ system locales, and Parakeet v2 otherwise.
 
 From the project's integration test (Parakeet v2 int8, release build, on an Apple Silicon Mac; your hardware will differ):
 
-- A 5 s clip transcribes in about 362 ms.
+- Clips of 4-6 s transcribe in roughly 360-530 ms (best run: a 5 s clip in about 362 ms).
 - A 62.5 s streamed dictation finishes about 421 ms after key-up.
 - Word error rate of 0.0 on the project's synthetic text-to-speech fixture set (a small set, not a general accuracy benchmark).
 
@@ -143,7 +144,7 @@ A single Rust process owns audio, inference, hotkeys, I/O and persistence; the w
 
 | Module | Responsibility |
 |---|---|
-| `hotkey` | Global triggers (macOS `Fn` event tap, `rdev`, Wayland portal) and the tap / double-tap gesture logic |
+| `hotkey` | Global triggers (macOS `Fn` event tap, `rdev`, Wayland portal stub) and the tap / double-tap gesture logic |
 | `audio` | `cpal` capture, resampling to 16 kHz mono, energy VAD, level meter |
 | `dictation` | Pure state machine plus the controller that wires audio, STT, post-processing, insertion and storage |
 | `stt` | `ChunkPlanner`, `SttSession`, the worker thread and the sherpa-onnx engine |
@@ -205,6 +206,7 @@ The manual end-to-end checks for dictation in real apps are listed in [docs/E2E-
 
 ## Roadmap
 
+- **Linux/Wayland**: global hotkeys through the XDG GlobalShortcuts portal.
 - **Part 2 - text intelligence**: local LLM cleanup (llama.cpp), optional bring-your-own API key (OpenAI / Anthropic),
   Command Mode, snippets and per-app styles.
 - **Part 3 - dashboard**: a Wispr-style analytics dashboard (words, WPM, streaks, time saved), full history, and polished settings and onboarding.
