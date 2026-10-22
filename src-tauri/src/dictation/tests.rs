@@ -58,6 +58,8 @@ fn silence(secs: f32) -> Vec<f32> {
 struct FakeRecorder {
     audio: Mutex<Vec<f32>>,
     start_error: Mutex<Option<RecorderError>>,
+    /// Simulates the device vanishing: the frame sender is dropped after the audio is sent.
+    lose_device: std::sync::atomic::AtomicBool,
     tx: Mutex<Option<Sender<Vec<f32>>>>,
     starts: AtomicUsize,
     stops: AtomicUsize,
@@ -68,6 +70,7 @@ impl FakeRecorder {
         Arc::new(Self {
             audio: Mutex::new(audio),
             start_error: Mutex::default(),
+            lose_device: Default::default(),
             tx: Mutex::default(),
             starts: AtomicUsize::new(0),
             stops: AtomicUsize::new(0),
@@ -82,6 +85,14 @@ impl RecorderPort for FakeRecorder {
             return Err(e);
         }
         let audio = self.audio.lock().unwrap().clone();
+        if self.lose_device.load(Ordering::SeqCst) {
+            std::thread::spawn(move || {
+                for f in audio.chunks(FRAME_LEN) {
+                    let _ = frame_tx.send(f.to_vec());
+                }
+            });
+            return Ok(());
+        }
         let tx = frame_tx.clone();
         std::thread::spawn(move || {
             for f in audio.chunks(FRAME_LEN) {
@@ -146,6 +157,9 @@ impl FakeStt {
     fn push(&self, text: &str, gate: Option<Arc<Notify>>) {
         self.scripts.lock().unwrap().push_back(Script { result: Ok(text.into()), gate });
     }
+    fn push_err(&self, e: SttError) {
+        self.scripts.lock().unwrap().push_back(Script { result: Err(e), gate: None });
+    }
     fn log(&self, i: usize) -> Arc<SessionLog> {
         self.logs.lock().unwrap()[i].clone()
     }
@@ -177,9 +191,13 @@ impl ModelSource for FakeModels {
 struct FakeInserter {
     inserted: Mutex<Vec<String>>,
     outcome: Mutex<InsertOutcome>,
+    panic_next: std::sync::atomic::AtomicBool,
 }
 impl Inserter for FakeInserter {
     fn insert(&self, text: &str) -> InsertOutcome {
+        if self.panic_next.swap(false, Ordering::SeqCst) {
+            panic!("inserter exploded");
+        }
         self.inserted.lock().unwrap().push(text.to_string());
         self.outcome.lock().unwrap().clone()
     }
@@ -203,7 +221,7 @@ struct Harness {
 fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
     let rec = FakeRecorder::new(audio);
     let stt = FakeStt::new();
-    let ins = Arc::new(FakeInserter { inserted: Mutex::default(), outcome: Mutex::new(InsertOutcome::Pasted) });
+    let ins = Arc::new(FakeInserter { inserted: Mutex::default(), outcome: Mutex::new(InsertOutcome::Pasted), panic_next: Default::default() });
     let store = Arc::new(Store::open_in_memory().unwrap());
     let events: Arc<Mutex<Vec<(String, Value)>>> = Arc::default();
     let esc: Arc<Mutex<Vec<bool>>> = Arc::default();
@@ -388,6 +406,8 @@ async fn no_model_shows_error() {
     h.send(HotkeyEvent::Pressed);
     wait_for("error state", || h.states().iter().any(|s| s["kind"] == "error" && s["message"] == "No model installed")).await;
     assert_eq!(h.rec.starts.load(Ordering::SeqCst), 0);
+    assert!(!h.kinds().contains(&"recording".to_string()), "no recording flicker: {:?}", h.kinds());
+    assert!(h.esc.lock().unwrap().is_empty(), "Esc never armed");
     advance(2100).await;
     wait_for("idle after 2 s", || h.kinds().last().map(String::as_str) == Some("idle")).await;
 }
@@ -483,4 +503,59 @@ async fn levels_are_throttled_to_30hz() {
     settle().await;
     let n = h.events.lock().unwrap().iter().filter(|(name, _)| name == crate::events::LEVEL).count();
     assert!(n >= 1 && n <= 5, "{n} level events for a ~25 ms burst");
+}
+
+#[tokio::test(start_paused = true)]
+async fn device_lost_mid_recording_shows_error_promptly() {
+    let h = harness(voiced(1.0), true);
+    h.rec.lose_device.store(true, Ordering::SeqCst);
+    h.send(HotkeyEvent::Pressed);
+    // No Released is ever sent: the loss must be noticed on its own.
+    wait_for("error state", || {
+        h.states().iter().any(|s| s["kind"] == "error" && s["message"] == "input device was lost")
+    })
+    .await;
+    wait_for("session cancelled", || h.stt.log(0).cancels.load(Ordering::SeqCst) == 1).await;
+    wait_for("recorder cancelled", || h.rec.cancels.load(Ordering::SeqCst) == 1).await;
+    assert_eq!(*h.esc.lock().unwrap(), [true, false]);
+    assert!(h.inserted().is_empty());
+    advance(2100).await;
+    wait_for("idle", || h.kinds().last().map(String::as_str) == Some("idle")).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn insert_panic_does_not_block_next_utterance() {
+    let h = harness(voiced(2.0), true);
+    h.ins.panic_next.store(true, Ordering::SeqCst);
+    h.send(HotkeyEvent::Pressed);
+    wait_for("A started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    wait_for("error after panic", || h.states().iter().any(|s| s["kind"] == "error")).await;
+    assert!(h.saved().is_empty());
+
+    h.send(HotkeyEvent::Pressed);
+    wait_for("B started", || h.rec.starts.load(Ordering::SeqCst) == 2).await;
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    wait_for("B inserted", || h.inserted().len() == 1).await;
+    wait_for("B persisted", || h.saved().len() == 1).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stt_error_in_a_still_inserts_b() {
+    let h = harness(voiced(2.0), true);
+    h.stt.push_err(SttError::EngineFailed("boom".into()));
+    h.send(HotkeyEvent::Pressed);
+    wait_for("A started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    wait_for("A error", || h.states().iter().any(|s| s["kind"] == "error" && s["message"].as_str().is_some_and(|m| m.contains("boom")))).await;
+
+    h.send(HotkeyEvent::Pressed);
+    wait_for("B started", || h.rec.starts.load(Ordering::SeqCst) == 2).await;
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    wait_for("B inserted", || h.inserted().len() == 1).await;
+    wait_for("B persisted", || h.saved().len() == 1).await;
 }

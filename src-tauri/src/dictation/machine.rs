@@ -59,6 +59,8 @@ pub enum Input {
     /// The oldest in-flight utterance contained no speech.
     NoSpeech,
     Inserted(InsertOutcome),
+    /// The oldest in-flight utterance failed outside the speech engine (recorder stop, insert).
+    Failed(String),
     Tick,
 }
 
@@ -155,6 +157,9 @@ pub fn step(state: State, input: Input, now: Instant) -> (State, Vec<Effect>) {
         (_, Input::Transcribed(Ok(_))) => finish(&old, State::Idle, vec![]),
         (State::Recording { .. }, Input::Transcribed(Err(e))) => (old, vec![Effect::ShowError(e.to_string())]),
         (_, Input::Transcribed(Err(e))) => finish(&old, error(e.to_string(), now), vec![]),
+
+        (State::Recording { .. }, Input::Failed(msg)) => (old, vec![Effect::ShowError(msg)]),
+        (_, Input::Failed(msg)) => finish(&old, error(msg, now), vec![]),
 
         (State::Transcribing, Input::NoSpeech) => finish(&old, State::Idle, vec![]),
         (State::Inserting, Input::Inserted(_)) => finish(&old, State::Idle, vec![Effect::Persist]),
