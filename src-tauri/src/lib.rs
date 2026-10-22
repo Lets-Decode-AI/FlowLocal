@@ -12,13 +12,14 @@ pub mod permissions;
 mod postprocess;
 pub mod stt;
 pub mod store;
+pub mod tray;
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, Submenu},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
@@ -80,7 +81,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open FlowLocal", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause dictation", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &pause, &quit])?;
+    let models_menu = Submenu::with_id(app, "models", "Active model", true)?;
+    app.manage(tray::ModelsMenu(models_menu.clone()));
+    let menu = Menu::with_items(app, &[&open, &models_menu, &pause, &quit])?;
+    tray::refresh_models_menu(app);
     if let Some(st) = app.try_state::<app_state::AppState>() {
         *st.pause_item.lock().unwrap_or_else(|p| p.into_inner()) = Some(pause.clone());
     }
@@ -101,7 +105,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
             }
             "quit" => app.exit(0),
-            _ => {}
+            other => {
+                if let Some(id) = tray::model_id_from_item(other) {
+                    tray::handle_model_click(app, id);
+                }
+            }
         });
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone());
@@ -153,6 +161,9 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         hf.clone(),
         Arc::new(move |p| {
             let _ = progress_handle.emit(events::DL_PROGRESS, &p);
+            if matches!(p.status, models::download::DlStatus::Installed) {
+                tray::refresh_models_menu(&progress_handle);
+            }
         }),
     );
     models.resume_incomplete_on_startup();

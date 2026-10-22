@@ -252,13 +252,17 @@ pub async fn model_cancel(st: State<'_, AppState>, id: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub async fn model_delete(st: State<'_, AppState>, id: String) -> Result<(), String> {
-    st.models.delete(&id).await.map_err(err)
+pub async fn model_delete(app: AppHandle, st: State<'_, AppState>, id: String) -> Result<(), String> {
+    let r = st.models.delete(&id).await.map_err(err);
+    crate::tray::refresh_models_menu(&app);
+    r
 }
 
 #[tauri::command]
-pub fn model_set_active(st: State<'_, AppState>, id: String) -> Result<(), String> {
-    st.models.set_active(&id).map_err(err)
+pub fn model_set_active(app: AppHandle, st: State<'_, AppState>, id: String) -> Result<(), String> {
+    let r = st.models.set_active(&id).map_err(err);
+    crate::tray::refresh_models_menu(&app);
+    r
 }
 
 // ---- history / dictionary ------------------------------------------------------------------
