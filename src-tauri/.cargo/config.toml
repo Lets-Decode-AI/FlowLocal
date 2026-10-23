@@ -4,6 +4,8 @@
 rustflags = ["-C", "relocation-model=dynamic-no-pic"]
 
 # The prebuilt sherpa-onnx static libraries for Windows use the static C
-# runtime (/MT). Match it so the app does not mix C runtimes.
+# runtime (/MT), and their onnxruntime and espeak-ng code call the event
+# tracing and registry APIs in advapi32. Match the runtime and pass advapi32
+# to every link step (sherpa-rs is also linked as its own dll).
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=advapi32.lib"]
