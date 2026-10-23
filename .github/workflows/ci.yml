@@ -116,7 +116,7 @@ jobs:
 
       # No tagName / releaseId: builds the bundles and does not publish anything.
       - name: Build with Tauri
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
