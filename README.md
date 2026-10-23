@@ -178,7 +178,7 @@ Prerequisites: [Rust](https://rustup.rs) (the toolchain is pinned to 1.99.1 by `
 and the platform dependencies for [Tauri 2](https://tauri.app/start/prerequisites/). On Ubuntu:
 
 ```bash
-sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libxdo-dev libxtst-dev libxi-dev
+sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libxdo-dev libxtst-dev libxi-dev cmake clang
 ```
 
 ```bash
