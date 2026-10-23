@@ -1,0 +1,75 @@
+name: Bug report
+description: Something is not working as expected
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the report. Please search existing issues first.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 11
+        - Windows 10
+        - Linux (X11)
+        - Linux (Wayland)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os_version
+    attributes:
+      label: OS version
+      placeholder: "e.g. macOS 15.1, Ubuntu 24.04 GNOME"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: FlowLocal version
+      placeholder: "e.g. 0.1.0 (from the Releases page or Settings)"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Active speech model
+      placeholder: "e.g. Parakeet TDT 0.6B v2 (int8)"
+    validations:
+      required: true
+  - type: input
+    id: target_app
+    attributes:
+      label: App you were dictating into
+      placeholder: "e.g. TextEdit, VS Code, Slack, Chrome textarea"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Please remove anything private. Dictated text may be sensitive.
+      render: shell

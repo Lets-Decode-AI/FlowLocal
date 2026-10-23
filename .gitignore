@@ -1,0 +1,27 @@
+# dependencies and build output
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# local tooling and agent workspaces
+.superpowers/
+.claude/
+
+# editors and OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# env and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# logs and test models
+*.log
+npm-debug.log*
+*.part

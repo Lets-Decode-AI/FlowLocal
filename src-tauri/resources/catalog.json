@@ -1,0 +1,284 @@
+{
+  "models": [
+    {
+      "id": "parakeet-v2",
+      "name": "Parakeet TDT 0.6B v2 (int8)",
+      "hf_repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+      "revision": "1ab9323565ddb038682214b292f588070a538ce2",
+      "files": [
+        {
+          "path": "encoder.int8.onnx",
+          "size": 652184296,
+          "sha256": "a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab"
+        },
+        {
+          "path": "decoder.int8.onnx",
+          "size": 7257753,
+          "sha256": "b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e"
+        },
+        {
+          "path": "joiner.int8.onnx",
+          "size": 1739080,
+          "sha256": "7946164367946e7f9f29a122407c3252b680dbae9a51343eb2488d057c3c43d2"
+        },
+        {
+          "path": "tokens.txt",
+          "size": 9384,
+          "sha256": "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d"
+        }
+      ],
+      "engine": "transducer",
+      "languages": [
+        "en"
+      ],
+      "min_ram_gb": 4,
+      "notes": "Default. Best English accuracy and speed."
+    },
+    {
+      "id": "parakeet-v3",
+      "name": "Parakeet TDT 0.6B v3 (int8)",
+      "hf_repo": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+      "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78",
+      "files": [
+        {
+          "path": "encoder.int8.onnx",
+          "size": 652184281,
+          "sha256": "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247"
+        },
+        {
+          "path": "decoder.int8.onnx",
+          "size": 11845275,
+          "sha256": "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e"
+        },
+        {
+          "path": "joiner.int8.onnx",
+          "size": 6355277,
+          "sha256": "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3"
+        },
+        {
+          "path": "tokens.txt",
+          "size": 93939,
+          "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+        }
+      ],
+      "engine": "transducer",
+      "languages": [
+        "bg",
+        "hr",
+        "cs",
+        "da",
+        "nl",
+        "en",
+        "et",
+        "fi",
+        "fr",
+        "de",
+        "el",
+        "hu",
+        "it",
+        "lv",
+        "lt",
+        "mt",
+        "pl",
+        "pt",
+        "ro",
+        "sk",
+        "sl",
+        "es",
+        "sv",
+        "ru",
+        "uk"
+      ],
+      "min_ram_gb": 4,
+      "notes": "25 European languages."
+    },
+    {
+      "id": "moonshine-base",
+      "name": "Moonshine Base (int8)",
+      "hf_repo": "csukuangfj/sherpa-onnx-moonshine-base-en-int8",
+      "revision": "052b0798ad1bf046a140fdd4efcd9426530fa3f5",
+      "files": [
+        {
+          "path": "preprocess.onnx",
+          "size": 14077290,
+          "sha256": "ffa630d395c5ccf76f5d4954be5b882df76aaf6491519ec01fd82ea7a3819fb2"
+        },
+        {
+          "path": "encode.int8.onnx",
+          "size": 50311494,
+          "sha256": "7e38770f776f2e5583a53b052936005df2ba5c833d7e09c2a5fd796b94bf73e2"
+        },
+        {
+          "path": "uncached_decode.int8.onnx",
+          "size": 122120451,
+          "sha256": "c01f4b35093bcac20d352d23a75a539e772964579f9d024a90e5e6f09cae9987"
+        },
+        {
+          "path": "cached_decode.int8.onnx",
+          "size": 99983837,
+          "sha256": "2db74e51cedf64a8b1be3c8192e0bb5e4923af0e90bd9e87f8e8771873f8ea03"
+        },
+        {
+          "path": "tokens.txt",
+          "size": 436688,
+          "sha256": "1165c2aeb9f72f457a83be2d459a09054f27490acd9b41bd43794dfd25e296ea"
+        }
+      ],
+      "engine": "moonshine",
+      "languages": [
+        "en"
+      ],
+      "min_ram_gb": 2,
+      "notes": "Small and fast; good for low-RAM machines."
+    },
+    {
+      "id": "whisper-tiny-en",
+      "name": "Whisper tiny.en (int8)",
+      "hf_repo": "csukuangfj/sherpa-onnx-whisper-tiny.en",
+      "revision": "d026532c022fa99fd789d6b32446a1df7b6bfc43",
+      "files": [
+        {
+          "path": "tiny.en-encoder.int8.onnx",
+          "size": 12937772,
+          "sha256": "0ce578b827c94a961aacb8fa14b02f096504b337e5c94be37c36238cbe3e8bc6"
+        },
+        {
+          "path": "tiny.en-decoder.int8.onnx",
+          "size": 89853865,
+          "sha256": "06c0e6ff6348d427e51839219d1c886c18cfdf411e629e33f5e1679bff9c1527"
+        },
+        {
+          "path": "tiny.en-tokens.txt",
+          "size": 835554,
+          "sha256": "306cd27f03c1a714eca7108e03d66b7dc042abe8c258b44c199a7ed9838dd930"
+        }
+      ],
+      "engine": "whisper",
+      "languages": [
+        "en"
+      ],
+      "min_ram_gb": 2,
+      "notes": "Smallest download; lowest accuracy."
+    },
+    {
+      "id": "whisper-small-en",
+      "name": "Whisper small.en (int8)",
+      "hf_repo": "csukuangfj/sherpa-onnx-whisper-small.en",
+      "revision": "d9533f69affd85061aee349af7fea5cb2996dbbe",
+      "files": [
+        {
+          "path": "small.en-encoder.int8.onnx",
+          "size": 112442483,
+          "sha256": "8bdac288f369aa94ee2194059238c465ed82ea9d47ee8fa4a8c0a891873e462f"
+        },
+        {
+          "path": "small.en-decoder.int8.onnx",
+          "size": 262223042,
+          "sha256": "710ccf890e10f3faa15f51ec346081a2723c9f3adb6e4da81c6573a5a6f877fb"
+        },
+        {
+          "path": "small.en-tokens.txt",
+          "size": 835554,
+          "sha256": "306cd27f03c1a714eca7108e03d66b7dc042abe8c258b44c199a7ed9838dd930"
+        }
+      ],
+      "engine": "whisper",
+      "languages": [
+        "en"
+      ],
+      "min_ram_gb": 3,
+      "notes": "Balanced English model."
+    },
+    {
+      "id": "sensevoice-small",
+      "name": "SenseVoice small (int8)",
+      "hf_repo": "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+      "revision": "2365baeacb507f821a0c8120fcee3d484dba7a07",
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "size": 239233841,
+          "sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51"
+        },
+        {
+          "path": "tokens.txt",
+          "size": 315894,
+          "sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc"
+        }
+      ],
+      "engine": "sensevoice",
+      "languages": [
+        "zh",
+        "en",
+        "ja",
+        "ko",
+        "yue"
+      ],
+      "min_ram_gb": 2,
+      "notes": "Chinese, English, Japanese, Korean, Cantonese."
+    },
+    {
+      "id": "whisper-turbo",
+      "name": "Whisper large-v3-turbo (int8)",
+      "hf_repo": "csukuangfj/sherpa-onnx-whisper-turbo",
+      "revision": "2ca6ff69fc878651b770880507669577ac41c2ff",
+      "files": [
+        {
+          "path": "turbo-encoder.int8.onnx",
+          "size": 674716297,
+          "sha256": "b02dcdf54f348741e93fe732b67d933c8dcb6735655f710640143081db38878b"
+        },
+        {
+          "path": "turbo-decoder.int8.onnx",
+          "size": 361080764,
+          "sha256": "20accd02388482eb3a46bd615631adfdc85e1eb2c7db9ea3f02a40ffe6b81547"
+        },
+        {
+          "path": "turbo-tokens.txt",
+          "size": 816730,
+          "sha256": "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126"
+        }
+      ],
+      "engine": "whisper",
+      "languages": [
+        "en",
+        "zh",
+        "de",
+        "es",
+        "ru",
+        "ko",
+        "fr",
+        "ja",
+        "pt",
+        "tr",
+        "pl",
+        "ca",
+        "nl",
+        "ar",
+        "sv",
+        "it",
+        "id",
+        "hi",
+        "fi",
+        "vi",
+        "he",
+        "uk",
+        "el",
+        "ms",
+        "cs",
+        "ro",
+        "da",
+        "hu",
+        "ta",
+        "no",
+        "th",
+        "ur",
+        "hr",
+        "bg",
+        "lt"
+      ],
+      "min_ram_gb": 6,
+      "notes": "35 languages (a subset of Whisper's 99). Large download."
+    }
+  ]
+}
