@@ -48,5 +48,5 @@ Windows code signing is not wired up yet.
 ## Before the first release
 
 - Create the `Lets-Decode-AI/maintainers` team (referenced by `.github/CODEOWNERS`) and enable Discussions and private vulnerability reporting.
-- Replace the placeholder conduct contact in `CODE_OF_CONDUCT.md`.
+- Optionally add a dedicated conduct email address to `CODE_OF_CONDUCT.md` (reports currently go through GitHub Security Advisories or the maintainers in `CODEOWNERS`).
 - Run through `docs/E2E-CHECKLIST.md` on a release build.

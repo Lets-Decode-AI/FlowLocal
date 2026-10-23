@@ -293,6 +293,7 @@ Schema migrations via a simple versioned migration table.
 - `sherpa-rs` coverage of all four engine kinds; fallback is calling the
   sherpa-onnx C API directly via `bindgen`.
 - macOS `Fn` key capture requires an event tap and Accessibility permission;
-  fallback default is Right-⌥ if the tap is unavailable.
+  a Right-⌥ fallback was dropped (it needs the same tap), so without the permission the app
+  shows "Grant Accessibility to enable the hotkey" and starts the hotkey once it is granted.
 - Synthetic paste can be blocked by some apps (secure input, some games/remote
   desktops); mitigated by the clipboard fallback.

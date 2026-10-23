@@ -25,12 +25,23 @@ downloaded from Hugging Face from within the app.
 - A hardware-aware default model is recommended on first run.
 - Streaming chunked transcription, so long dictations finish quickly after you let go of the key.
 - Flow Bar: a small always-on-top pill that shows recording, transcribing, done and error states without taking focus.
-- Text is inserted by pasting, and your clipboard (text or image) is restored afterwards.
+- Text is inserted by pasting, and your clipboard (text or image) is restored afterwards. Only plain text and images are
+  restored: rich formatting (HTML/RTF) comes back as plain text, and if the clipboard held something FlowLocal cannot read
+  (files, for example) it is left alone rather than cleared.
 - Personal dictionary replacements, simple capitalization and spacing clean-up.
 - Searchable local history of your dictations (SQLite on your machine).
 - Low resource use: tray-only at rest, and the model is unloaded after an idle timeout (default 10 minutes, configurable, or never).
 - Optional Hugging Face token for gated or private repos, stored in the OS keychain.
 - Launch at login, microphone selection, rebindable hotkeys.
+
+## Privacy
+
+- Audio is processed on your device and is never uploaded; there is no account and no telemetry.
+- The microphone stays open for up to 15 s after a dictation so the next one doesn't clip the first word. While it is open only the latest 0.3 s of audio is held in memory,
+  and it is closed after that.
+- The only network traffic is downloading models (and searching) on Hugging Face, which you start yourself.
+- Custom Hugging Face repos: files tracked with Git LFS are verified against their SHA-256; non-LFS files
+  (such as `tokens.txt`) are only size-checked because Hugging Face publishes no hash for them.
 
 ## Screenshots
 
@@ -67,7 +78,11 @@ FlowLocal needs two permissions, which onboarding walks you through (System Sett
 
 - **Microphone** - to record your voice.
 - **Accessibility** - for the global hotkey (the `Fn` key is read through an event tap) and to send the paste keystroke.
-  If the event tap is unavailable, the fallback hotkey is Right-Option.
+  If it has not been granted yet, FlowLocal shows "Grant Accessibility to enable the hotkey"; the hotkey starts as soon as
+  you grant it (no relaunch needed).
+
+If you use the `Fn` / Globe key as the hotkey, set System Settings > Keyboard > "Press 🌐 key to:" **Do Nothing**,
+otherwise macOS may open the emoji picker or its own dictation at the same time.
 
 ### Windows
 
@@ -159,11 +174,11 @@ The React/TypeScript UI is in [`src`](src) (`flowbar.html` is the Flow Bar windo
 
 ## Build from source
 
-Prerequisites: [Rust](https://rustup.rs) (the toolchain is pinned by `rust-toolchain.toml`), Node.js 20 or newer,
+Prerequisites: [Rust](https://rustup.rs) (the toolchain is pinned to 1.99.1 by `rust-toolchain.toml`; Rust 1.88 or newer is required), Node.js 20 or newer,
 and the platform dependencies for [Tauri 2](https://tauri.app/start/prerequisites/). On Ubuntu:
 
 ```bash
-sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libxdo-dev
+sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libxdo-dev libxtst-dev libxi-dev
 ```
 
 ```bash

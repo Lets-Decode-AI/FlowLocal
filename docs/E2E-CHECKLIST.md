@@ -40,5 +40,7 @@ For each of **TextEdit, a Safari textarea, VS Code and Slack**:
 ## 5. Other platforms (best effort)
 
 - [ ] Windows: install via the NSIS installer, hold `Ctrl+Win`, dictate into Notepad.
+- [ ] Windows: releasing `Ctrl+Win` must not open the Start menu (the Win key is not masked in Part 1). Note what happens and whether the Start menu steals focus before the paste.
+- [ ] Windows / X11: press `Win+L` (lock) or `Alt+Tab` while the chord is partly held, unlock/return, then press only `Ctrl`: no recording may start (stale-modifier check).
 - [ ] Linux (X11): install the `.deb` or run the `.AppImage`, hold `Ctrl+Super`, dictate into a text editor.
 - [ ] Linux (Wayland): confirm the clipboard fallback notice appears when paste is blocked.
