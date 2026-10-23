@@ -232,6 +232,8 @@ struct Harness {
     events: Arc<Mutex<Vec<(String, Value)>>>,
     esc: Arc<Mutex<Vec<bool>>>,
     level_tx: std::sync::mpsc::SyncSender<f32>,
+    mic_denied: Arc<std::sync::atomic::AtomicBool>,
+    no_model_calls: Arc<AtomicUsize>,
 }
 
 fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
@@ -245,6 +247,9 @@ fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
     let store = Arc::new(Store::open_in_memory().unwrap());
     let events: Arc<Mutex<Vec<(String, Value)>>> = Arc::default();
     let esc: Arc<Mutex<Vec<bool>>> = Arc::default();
+    let mic_denied: Arc<std::sync::atomic::AtomicBool> = Arc::default();
+    let no_model_calls = Arc::new(AtomicUsize::new(0));
+    let (md, nm) = (mic_denied.clone(), no_model_calls.clone());
     let (hk, hk_rx) = std::sync::mpsc::channel();
     let (level_tx, level_rx) = std::sync::mpsc::sync_channel(64);
     let ev = events.clone();
@@ -260,6 +265,10 @@ fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
         emit: Arc::new(move |name, v| ev.lock().unwrap().push((name.to_string(), v))),
         arm_esc: Arc::new(move |b| esc2.lock().unwrap().push(b)),
         app_name: Arc::new(|| Some("Notes".to_string())),
+        mic_denied: Arc::new(move || md.load(Ordering::SeqCst)),
+        on_no_model: Arc::new(move || {
+            nm.fetch_add(1, Ordering::SeqCst);
+        }),
     });
     Harness {
         handle,
@@ -271,6 +280,8 @@ fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
         events,
         esc,
         level_tx,
+        mic_denied,
+        no_model_calls,
     }
 }
 
@@ -599,7 +610,9 @@ async fn copied_only_emits_toast_and_still_persists() {
         .map(|(_, v)| v.clone())
         .collect();
     assert_eq!(toasts.len(), 1);
-    assert_eq!(toasts[0]["message"], json!("secure input is active"));
+    assert_eq!(toasts[0]["level"], json!("warning"));
+    assert_eq!(toasts[0]["message"], json!(super::COPIED_ONLY_MESSAGE));
+    assert!(super::COPIED_ONLY_MESSAGE.starts_with("Copied \u{2014} press "));
 }
 
 #[tokio::test(start_paused = true)]
@@ -715,4 +728,95 @@ async fn stt_error_in_a_still_inserts_b() {
     h.send(HotkeyEvent::Released);
     wait_for("B inserted", || h.inserted().len() == 1).await;
     wait_for("B persisted", || h.saved().len() == 1).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn insert_waits_while_the_hotkey_is_held_for_the_next_utterance() {
+    // Pasting while the chord is physically down would fire Ctrl+Win+V / Cmd+Opt+V.
+    let h = harness(voiced(2.0), true);
+    let gate_a = Arc::new(Notify::new());
+    h.stt.push("alpha", Some(gate_a.clone()));
+    h.stt.push("beta", None);
+
+    h.send(HotkeyEvent::Pressed);
+    wait_for("A started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    wait_for("A transcribing", || {
+        h.stt.log(0).finishes.load(Ordering::SeqCst) == 1
+    })
+    .await;
+
+    h.send(HotkeyEvent::Pressed); // B: held
+    wait_for("B recording", || h.rec.starts.load(Ordering::SeqCst) == 2).await;
+    gate_a.notify_one(); // A's text is ready while B is being held
+    settle().await;
+    settle().await;
+    assert!(
+        h.inserted().is_empty(),
+        "must not paste while the chord is down: {:?}",
+        h.inserted()
+    );
+
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    wait_for("both inserted after release", || h.inserted().len() == 2).await;
+    assert_eq!(h.inserted(), ["Alpha", "Beta"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn insert_is_not_held_by_a_hands_free_recording() {
+    let h = harness(voiced(2.0), true);
+    let gate_a = Arc::new(Notify::new());
+    h.stt.push("alpha", Some(gate_a.clone()));
+    h.send(HotkeyEvent::Pressed);
+    wait_for("A started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    wait_for("A transcribing", || {
+        h.stt.log(0).finishes.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    h.send(HotkeyEvent::DoubleTap);
+    wait_for("hands-free recording", || {
+        h.states().last().is_some_and(|s| s["handsFree"] == true)
+    })
+    .await;
+    gate_a.notify_one();
+    wait_for("A inserted during hands-free", || h.inserted().len() == 1).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn denied_microphone_is_reported_not_silently_discarded() {
+    let h = harness(voiced(1.0), true);
+    h.mic_denied.store(true, Ordering::SeqCst);
+    h.send(HotkeyEvent::Pressed);
+    wait_for("error state", || {
+        h.states()
+            .iter()
+            .any(|s| s["kind"] == "error" && s["message"] == "Microphone access denied")
+    })
+    .await;
+    assert_eq!(h.rec.starts.load(Ordering::SeqCst), 0);
+    assert!(!h.kinds().contains(&"recording".to_string()));
+    assert!(h.esc.lock().unwrap().is_empty(), "Esc never armed");
+    let toasts: Vec<Value> = h
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(n, _)| n == crate::events::TOAST)
+        .map(|(_, v)| v.clone())
+        .collect();
+    assert_eq!(toasts.len(), 1);
+    assert_eq!(toasts[0]["message"], json!("Microphone access denied"));
+    assert_eq!(toasts[0]["level"], json!("error"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_model_asks_the_app_to_open_the_models_page() {
+    let h = harness(voiced(1.0), false);
+    h.send(HotkeyEvent::Pressed);
+    wait_for("error", || h.states().iter().any(|s| s["kind"] == "error")).await;
+    assert_eq!(h.no_model_calls.load(Ordering::SeqCst), 1);
 }

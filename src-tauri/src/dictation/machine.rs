@@ -18,6 +18,9 @@ pub const HANDS_FREE_MAX: Duration = Duration::from_secs(6 * 60);
 /// How long the error state is shown.
 pub const ERROR_SHOWN_FOR: Duration = Duration::from_secs(2);
 
+/// Shown (state + toast) when the OS denies microphone access.
+pub const MIC_DENIED: &str = "Microphone access denied";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum State {
     Idle,
@@ -54,6 +57,8 @@ pub enum Input {
     RecorderFailed(RecorderError),
     /// There is no active speech model, so recording cannot start.
     NoModel,
+    /// The OS denies microphone access, so recording cannot start.
+    MicDenied,
     /// The oldest in-flight utterance finished transcribing (results arrive in utterance order).
     Transcribed(Result<String, SttError>),
     /// The oldest in-flight utterance contained no speech.
@@ -185,6 +190,13 @@ pub fn step(state: State, input: Input, now: Instant) -> (State, Vec<Effect>) {
             vec![Effect::CancelRecording, Effect::ArmEsc(false)],
         ),
         (_, Input::NoModel) => finish(&old, error("No model installed".into(), now), vec![]),
+
+        (State::Recording { .. }, Input::MicDenied) => finish(
+            &old,
+            error(MIC_DENIED.into(), now),
+            vec![Effect::CancelRecording, Effect::ArmEsc(false)],
+        ),
+        (_, Input::MicDenied) => finish(&old, error(MIC_DENIED.into(), now), vec![]),
 
         (State::Recording { .. }, Input::Transcribed(Ok(text))) if !text.trim().is_empty() => {
             (old, vec![Effect::Insert(text)])
@@ -343,6 +355,20 @@ mod tests {
         let (s, fx) = step(s, Input::Tick, t + Duration::from_secs(2));
         assert_eq!(s, State::Idle);
         assert_eq!(fx, vec![Effect::Emit(State::Idle)]);
+    }
+
+    #[test]
+    fn mic_denied_goes_to_error_without_recording() {
+        let t = Instant::now();
+        let (s, fx) = step(State::Idle, Input::MicDenied, t);
+        assert_eq!(
+            s,
+            State::Error {
+                message: "Microphone access denied".into(),
+                since: t
+            }
+        );
+        assert!(!has(&fx, &Effect::StartRecording));
     }
 
     #[test]

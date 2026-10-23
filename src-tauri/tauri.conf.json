@@ -26,11 +26,12 @@
         "focusable": false,
         "visible": true,
         "resizable": false,
-        "shadow": false
+        "shadow": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {

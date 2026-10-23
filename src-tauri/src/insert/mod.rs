@@ -53,11 +53,7 @@ struct LastInsert {
 }
 
 /// The character before the cursor, if we pasted into the same app moments ago.
-fn prev_char_after(
-    last: Option<&LastInsert>,
-    app: &Option<String>,
-    now: Instant,
-) -> Option<char> {
+fn prev_char_after(last: Option<&LastInsert>, app: &Option<String>, now: Instant) -> Option<char> {
     last.filter(|l| l.app == *app && now.saturating_duration_since(l.at) <= CONTEXT_WINDOW)
         .map(|l| l.ch)
 }
@@ -79,10 +75,7 @@ impl<C: Clipboard, K: Keystroke> ClipboardInserter<C, K> {
         }
     }
 
-    pub fn with_app_name(
-        mut self,
-        f: impl Fn() -> Option<String> + Send + Sync + 'static,
-    ) -> Self {
+    pub fn with_app_name(mut self, f: impl Fn() -> Option<String> + Send + Sync + 'static) -> Self {
         self.app_name = Box::new(f);
         self
     }
@@ -338,12 +331,14 @@ mod tests {
         assert_eq!(ins.context().prev_char, None);
     }
 
-    /// Rig with a controllable frontmost app and clock.
-    fn ctx_rig() -> (
+    type CtxRig = (
         ClipboardInserter<FakeClipboard, FakeKeys>,
         Arc<Mutex<Option<String>>>,
         Arc<Mutex<std::time::Instant>>,
-    ) {
+    );
+
+    /// Rig with a controllable frontmost app and clock.
+    fn ctx_rig() -> CtxRig {
         let (ins, _) = rig(ClipboardSnapshot::Text("old".into()), false, false);
         let app = Arc::new(Mutex::new(Some("Notes".to_string())));
         let clock = Arc::new(Mutex::new(std::time::Instant::now()));

@@ -40,6 +40,11 @@ pub fn status() -> PermissionsStatus {
     }
 }
 
+/// The OS has explicitly denied (or restricted) microphone access.
+pub fn microphone_denied() -> bool {
+    microphone() == Perm::Denied
+}
+
 pub fn settings_url(kind: PermKind) -> &'static str {
     match kind {
         PermKind::Microphone => {

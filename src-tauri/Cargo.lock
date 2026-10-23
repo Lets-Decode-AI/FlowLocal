@@ -1608,6 +1608,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
+ "tauri-plugin-single-instance",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -1616,6 +1617,7 @@ dependencies = [
  "tracing-subscriber",
  "windows-sys 0.61.2",
  "wiremock",
+ "x11",
 ]
 
 [[package]]
@@ -5284,6 +5286,22 @@ dependencies = [
  "tauri",
  "tauri-plugin",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "tauri-plugin-single-instance"
+version = "2.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "561cd99484561bc39c954768e7b41a66cebbe1ac3d9d081c34361f740c489e2c"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "windows-sys 0.61.2",
+ "zbus",
 ]
 
 [[package]]

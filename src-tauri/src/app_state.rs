@@ -244,6 +244,8 @@ pub struct AppState {
     pub hf: crate::models::hf::HfClient,
     pub hk_tx: Mutex<std::sync::mpsc::Sender<crate::hotkey::HotkeyEvent>>,
     pub hotkey_starting: Arc<AtomicBool>,
+    /// A hotkey restart was already triggered for the current Accessibility grant.
+    pub hotkey_grant_retried: AtomicBool,
     /// Last `dictation://state` payload (what `get_state` returns).
     pub dictation_state: Arc<Mutex<Value>>,
     pub paused: AtomicBool,

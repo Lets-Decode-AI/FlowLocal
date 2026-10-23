@@ -305,11 +305,7 @@ impl Manager {
     /// points at a model that is no longer installed. `None` only when nothing is installed.
     pub fn ensure_active(&self) -> Option<InstalledModel> {
         let installed = self.installed();
-        let id = self
-            .store
-            .get_setting::<String>(ACTIVE_KEY)
-            .ok()
-            .flatten();
+        let id = self.store.get_setting::<String>(ACTIVE_KEY).ok().flatten();
         if let Some(m) = id.and_then(|id| installed.iter().find(|m| m.entry.id == id)) {
             return Some(m.clone());
         }
@@ -944,10 +940,15 @@ mod tests {
         wait_for(&fx, |p| p.status == DlStatus::Installed).await;
         // Legacy "" value and a dangling id both count as "no valid active model".
         for stale in ["", "gone"] {
-            fx.store.set_setting(ACTIVE_KEY, &stale.to_string()).unwrap();
+            fx.store
+                .set_setting(ACTIVE_KEY, &stale.to_string())
+                .unwrap();
             assert_eq!(m.ensure_active().unwrap().entry.id, "hf:owner/name");
             assert_eq!(
-                fx.store.get_setting::<String>(ACTIVE_KEY).unwrap().as_deref(),
+                fx.store
+                    .get_setting::<String>(ACTIVE_KEY)
+                    .unwrap()
+                    .as_deref(),
                 Some("hf:owner/name")
             );
         }

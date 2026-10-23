@@ -25,7 +25,7 @@ pub const FRAME_LEN: usize = (SAMPLE_RATE * FRAME_MS / 1000) as usize;
 /// Audio kept from before `start()` while the stream is warm (300 ms).
 const PREROLL_SAMPLES: usize = (SAMPLE_RATE as usize) * 3 / 10;
 /// The stream stays open this long after the last recording stops.
-const WARM_FOR: Duration = Duration::from_secs(60);
+const WARM_FOR: Duration = Duration::from_secs(15);
 /// One level event per ~33 ms of audio.
 const LEVEL_SAMPLES: usize = (SAMPLE_RATE as usize) * 33 / 1000;
 const POLL: Duration = Duration::from_millis(100);
@@ -380,9 +380,8 @@ impl Pipeline {
         } else {
             self.resampler.flush().map(|_| Vec::new())
         };
-        let tail = tail?;
-        if flush {
-            self.push(&tail);
+        if flush && let Ok(tail) = &tail {
+            self.push(tail);
             if !self.framer.is_empty() {
                 if let Some(tx) = self.session.as_ref() {
                     let _ = tx.send(self.framer.clone());
@@ -390,9 +389,11 @@ impl Pipeline {
                 self.emitted += self.framer.len() as u64;
             }
         }
+        // Clean up before reporting a resampler error, so the consumer always sees the end.
         self.framer.clear();
         self.ring.clear();
         self.session = None; // drops the sender: the consumer sees the end
+        tail?;
         Ok(RecordingStats {
             duration_ms: self.emitted * 1000 / SAMPLE_RATE as u64,
         })

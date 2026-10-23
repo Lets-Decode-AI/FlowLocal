@@ -14,7 +14,7 @@ use crate::app_state::{
     commit_settings, os_locale, recommend_dto,
 };
 use crate::events;
-use crate::hotkey::{HotkeyError, HotkeyEvent, HotkeyService, default_binding, fallback_binding};
+use crate::hotkey::{HotkeyError, HotkeyEvent, HotkeyService, retry_hotkey_start};
 use crate::models::catalog::{Catalog, CatalogEntry};
 use crate::models::hardware::Hardware;
 use crate::models::hf::{HfRepoSummary, Inspection};
@@ -68,6 +68,16 @@ pub fn toast(app: &AppHandle, level: &str, message: &str) {
     );
 }
 
+/// Clears the "starting" flag when dropped, so a panic in the start thread (or a failed thread
+/// spawn) cannot leave hotkey start-up wedged forever.
+struct StartingGuard(Arc<AtomicBool>);
+
+impl Drop for StartingGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Starts the hotkey service on its own thread (the macOS tap can block ~300 ms) unless one is
 /// running or being started. The thread installs the service and then re-reads the CURRENT
 /// binding, so a change made while it was starting is not lost.
@@ -82,31 +92,25 @@ pub fn spawn_hotkey_start(
     if starting.swap(true, Ordering::SeqCst) {
         return;
     }
+    let guard = StartingGuard(starting);
     if slot.lock().unwrap_or_else(|p| p.into_inner()).is_some() {
-        starting.store(false, Ordering::SeqCst);
-        return;
+        return; // guard clears the flag
     }
-    let spawned = std::thread::Builder::new().name("flowlocal-hotkey-start".into()).spawn({
-        let starting = starting.clone();
-        move || {
-            let requested = settings.lock().unwrap_or_else(|p| p.into_inner()).hotkey.clone();
+    // If the spawn fails the closure (and with it the guard) is dropped, clearing the flag.
+    let _ = std::thread::Builder::new()
+        .name("flowlocal-hotkey-start".into())
+        .spawn(move || {
+            let requested = settings
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .hotkey
+                .clone();
             let mut notice: Option<(&str, String)> = None;
-            let started = match HotkeyService::start(requested.clone(), tx.clone()) {
+            let started = match HotkeyService::start(requested.clone(), tx) {
                 Ok(s) => Some(s),
-                Err(HotkeyError::TapUnavailable) if cfg!(target_os = "macos") && requested == default_binding() => {
-                    match HotkeyService::start(fallback_binding(), tx.clone()) {
-                        Ok(s) => {
-                            notice = Some((
-                                "warning",
-                                "Fn key unavailable \u{2014} using Right \u{2325}. Grant Accessibility to use Fn.".into(),
-                            ));
-                            Some(s)
-                        }
-                        Err(e) => {
-                            notice = Some(("error", format!("Global hotkey unavailable: {e}")));
-                            None
-                        }
-                    }
+                Err(HotkeyError::TapUnavailable) => {
+                    notice = Some(("warning", TAP_UNAVAILABLE_NOTICE.into()));
+                    None
                 }
                 Err(HotkeyError::Unsupported) => {
                     notice = Some(("warning", "Global hotkey unavailable on Wayland".into()));
@@ -127,16 +131,29 @@ pub fn spawn_hotkey_start(
             } else {
                 tracing::warn!("hotkey service not started");
             }
-            starting.store(false, Ordering::SeqCst);
+            drop(guard);
             if let Some((level, msg)) = notice {
                 std::thread::sleep(toast_delay);
                 toast(&app, level, &msg);
             }
-        }
-    });
-    if spawned.is_err() {
-        starting.store(false, Ordering::SeqCst);
-    }
+        });
+}
+
+/// Flow Bar / toast text when the macOS event tap cannot be created.
+pub const TAP_UNAVAILABLE_NOTICE: &str = "Grant Accessibility to enable the hotkey";
+
+/// Re-attempt hotkey start-up from the current app state (idempotent: a running or starting
+/// service makes this a no-op).
+fn restart_hotkey(app: &AppHandle, st: &AppState) {
+    let tx = st.hk_tx.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    spawn_hotkey_start(
+        app.clone(),
+        st.hotkey.clone(),
+        st.settings.clone(),
+        st.hotkey_starting.clone(),
+        tx,
+        Duration::ZERO,
+    );
 }
 
 /// Persist `new` and apply every changed field live. Autostart (the fallible part) is applied
@@ -156,16 +173,19 @@ pub fn apply_settings(app: &AppHandle, st: &AppState, new: Settings) -> Result<(
             None => {
                 drop(g);
                 // No service yet (failed earlier, e.g. Accessibility was missing): try again.
-                let tx = st.hk_tx.lock().unwrap_or_else(|p| p.into_inner()).clone();
-                spawn_hotkey_start(
-                    app.clone(),
-                    st.hotkey.clone(),
-                    st.settings.clone(),
-                    st.hotkey_starting.clone(),
-                    tx,
-                    Duration::ZERO,
-                );
+                restart_hotkey(app, st);
             }
+        }
+    }
+    if new.onboarded && !old.onboarded {
+        let empty = st
+            .hotkey
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_none();
+        let mut retried = st.hotkey_grant_retried.load(Ordering::SeqCst);
+        if retry_hotkey_start(empty, false, &mut retried, true) {
+            restart_hotkey(app, st);
         }
     }
     if new.mic != old.mic {
@@ -199,8 +219,23 @@ pub fn set_paused(st: State<'_, AppState>, paused: bool) {
 // ---- permissions ---------------------------------------------------------------------------
 
 #[tauri::command(async)]
-pub fn permissions_status() -> PermissionsStatus {
-    permissions::status()
+pub fn permissions_status(app: AppHandle, st: State<'_, AppState>) -> PermissionsStatus {
+    let status = permissions::status();
+    // The onboarding screen polls this. Accessibility granted while the hotkey never started
+    // (the macOS tap needs it) means we can start it now, without a relaunch.
+    let empty = st
+        .hotkey
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .is_none();
+    let mut retried = st.hotkey_grant_retried.load(Ordering::SeqCst);
+    let granted = status.accessibility == permissions::Perm::Granted;
+    let retry = retry_hotkey_start(empty, granted, &mut retried, false);
+    st.hotkey_grant_retried.store(retried, Ordering::SeqCst);
+    if retry {
+        restart_hotkey(&app, &st);
+    }
+    status
 }
 
 #[tauri::command(async)]

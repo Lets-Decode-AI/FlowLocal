@@ -133,7 +133,7 @@ fn run(
     while !stopped.load(Ordering::Relaxed) {
         CFRunLoop::run_in_mode(
             unsafe { kCFRunLoopDefaultMode },
-            Duration::from_millis(250),
+            Duration::from_secs(5),
             false,
         );
         // Cheap and idempotent; recovers a tap the system disabled.

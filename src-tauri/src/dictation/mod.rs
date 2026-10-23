@@ -113,6 +113,10 @@ pub struct ControllerDeps {
     pub arm_esc: Arc<dyn Fn(bool) + Send + Sync>,
     /// Name of the frontmost app (`insert::frontmost_app_name`), read at key-down.
     pub app_name: Arc<dyn Fn() -> Option<String> + Send + Sync>,
+    /// Whether the OS has denied microphone access (probed at key-down; macOS only).
+    pub mic_denied: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// Called when a dictation was requested but no speech model is installed.
+    pub on_no_model: Arc<dyn Fn() + Send + Sync>,
 }
 
 pub struct ControllerHandle {
@@ -133,6 +137,12 @@ impl Drop for ControllerHandle {
 }
 
 // ---- controller -----------------------------------------------------------------------------
+
+/// Flow Bar message when the text was only copied (the reason is logged).
+#[cfg(target_os = "macos")]
+pub const COPIED_ONLY_MESSAGE: &str = "Copied \u{2014} press \u{2318}V";
+#[cfg(not(target_os = "macos"))]
+pub const COPIED_ONLY_MESSAGE: &str = "Copied \u{2014} press Ctrl+V";
 
 /// Minimum spacing of level events (~30 Hz).
 const LEVEL_EVERY: Duration = Duration::from_millis(33);
@@ -283,6 +293,8 @@ struct ControllerDeps2 {
     emit: EmitFn,
     arm_esc: Arc<dyn Fn(bool) + Send + Sync>,
     app_name: Arc<dyn Fn() -> Option<String> + Send + Sync>,
+    mic_denied: Arc<dyn Fn() -> bool + Send + Sync>,
+    on_no_model: Arc<dyn Fn() + Send + Sync>,
 }
 
 fn spawn_pump(
@@ -329,6 +341,8 @@ impl Controller {
             emit,
             arm_esc,
             app_name,
+            mic_denied,
+            on_no_model,
         } = deps;
 
         let hk_tx = tx.clone();
@@ -364,6 +378,8 @@ impl Controller {
                 emit,
                 arm_esc,
                 app_name,
+                mic_denied,
+                on_no_model,
             },
             tx: tx.clone(),
             state: State::Idle,
@@ -401,13 +417,35 @@ impl Controller {
     }
 
     fn handle(&mut self, msg: Msg) {
+        self.handle_msg(msg);
+        // A hotkey release (or any state change away from "held") may unblock queued inserts.
+        self.pump_queue();
+    }
+
+    /// While the chord is physically held, pasting would turn the synthetic Ctrl/Cmd+V into
+    /// Ctrl+Win+V / Cmd+Opt+V. Hands-free recordings do not hold the chord.
+    fn chord_held(&self) -> bool {
+        matches!(
+            self.state,
+            State::Recording {
+                hands_free: false,
+                ..
+            }
+        )
+    }
+
+    fn handle_msg(&mut self, msg: Msg) {
         match msg {
             Msg::Hotkey(ev) if !self.paused => {
                 let starts = matches!(ev, HotkeyEvent::Pressed | HotkeyEvent::DoubleTap)
                     && !matches!(self.state, State::Recording { .. });
                 if starts && self.d.models.active().is_none() {
                     // Straight to the error: no Recording flicker, Esc never armed.
+                    (self.d.on_no_model)();
                     self.run(Input::NoModel);
+                } else if starts && (self.d.mic_denied)() {
+                    self.toast("error", machine::MIC_DENIED);
+                    self.run(Input::MicDenied);
                 } else {
                     self.run(Input::Hotkey(ev));
                 }
@@ -466,7 +504,8 @@ impl Controller {
                             job.text = text;
                         }
                         if let InsertOutcome::CopiedOnly(reason) = &outcome {
-                            self.toast("info", reason);
+                            tracing::info!("text was copied but not pasted: {reason}");
+                            self.toast("warning", COPIED_ONLY_MESSAGE);
                         }
                         outcome
                     }
@@ -481,7 +520,10 @@ impl Controller {
 
     /// Feeds finished utterances to the machine strictly in utterance order, one insert at a time.
     fn pump_queue(&mut self) {
-        while self.inserting.is_none() && self.slots.front().is_some_and(|s| s.res.is_some()) {
+        while self.inserting.is_none()
+            && !self.chord_held()
+            && self.slots.front().is_some_and(|s| s.res.is_some())
+        {
             let slot = self.slots.pop_front().expect("front checked");
             self.cur_meta = Some(slot.meta);
             let input = match slot.res.expect("ready") {

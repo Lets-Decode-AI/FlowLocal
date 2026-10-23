@@ -12,6 +12,8 @@ use std::time::Instant;
 pub mod gesture;
 #[cfg(target_os = "macos")]
 pub mod macos_fn;
+#[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
+pub mod physical;
 pub mod portal;
 #[cfg(not(target_os = "macos"))]
 pub mod rdev_backend;
@@ -29,7 +31,7 @@ pub enum HotkeyEvent {
 #[derive(Debug, thiserror::Error)]
 pub enum HotkeyError {
     /// The macOS event tap could not be created (Accessibility / Input
-    /// Monitoring not granted). Callers may retry with `fallback_binding()`.
+    /// Monitoring not granted). Retry once the permission is granted.
     #[error("keyboard event tap unavailable (grant Accessibility permission)")]
     TapUnavailable,
     #[error("global hotkeys are not supported on this platform/session")]
@@ -70,14 +72,6 @@ pub fn default_binding() -> Binding {
     Binding { keys }
 }
 
-/// Binding to use when the default `Fn` key cannot be observed (macOS event
-/// tap unavailable). Applying it is the settings layer's decision.
-pub fn fallback_binding() -> Binding {
-    Binding {
-        keys: vec![Key::AltRight],
-    }
-}
-
 /// Tracks which keys are down and reports chord transitions.
 pub struct ChordTracker {
     binding: Binding,
@@ -108,6 +102,32 @@ impl ChordTracker {
     }
 }
 
+/// Asks the OS whether a key is physically down right now. Used to discard keys the tracker
+/// believes are held but whose release was never seen (e.g. Win after Win+L).
+pub type KeyVerifier = Box<dyn Fn(Key) -> bool + Send>;
+
+/// Whether a stopped/failed hotkey service should be started again. Pure so the policy is
+/// testable: retry when the slot is empty and either Accessibility was just granted (once per
+/// grant, tracked in `retried_for_grant`) or onboarding just completed.
+pub fn retry_hotkey_start(
+    slot_empty: bool,
+    accessibility_granted: bool,
+    retried_for_grant: &mut bool,
+    onboarded_now: bool,
+) -> bool {
+    if !accessibility_granted {
+        *retried_for_grant = false;
+    }
+    if !slot_empty {
+        return false;
+    }
+    let fresh_grant = accessibility_granted && !*retried_for_grant;
+    if fresh_grant {
+        *retried_for_grant = true;
+    }
+    fresh_grant || onboarded_now
+}
+
 /// State shared between the service handle and the backend thread.
 pub struct Core {
     chord: ChordTracker,
@@ -115,6 +135,7 @@ pub struct Core {
     pub armed: bool,
     esc_down: bool,
     tx: Sender<HotkeyEvent>,
+    verifier: Option<KeyVerifier>,
 }
 
 impl Core {
@@ -125,7 +146,13 @@ impl Core {
             armed: false,
             esc_down: false,
             tx,
+            verifier: None,
         }
+    }
+
+    /// Install the physical-key check (Windows / X11 backends).
+    pub fn set_verifier(&mut self, v: KeyVerifier) {
+        self.verifier = Some(v);
     }
 
     fn emit(&self, events: impl IntoIterator<Item = HotkeyEvent>) {
@@ -147,14 +174,43 @@ impl Core {
             return;
         }
         if let Some(chord_down) = self.chord.on_key(key, down) {
+            if chord_down && !self.chord_keys_really_down(key) {
+                return;
+            }
             let events = self.gesture.on_key(chord_down, Instant::now());
             self.emit(events);
         }
     }
 
+    /// The chord just completed with `latest`. The other keys must be physically down: any the
+    /// OS says are up are stale (their release was missed) and are forgotten, and the chord is
+    /// not reported. `latest` itself is skipped: a low-level hook runs before the OS updates it.
+    fn chord_keys_really_down(&mut self, latest: Key) -> bool {
+        let Some(verify) = self.verifier.as_ref() else {
+            return true;
+        };
+        let stale: Vec<Key> = self
+            .chord
+            .binding
+            .keys
+            .iter()
+            .copied()
+            .filter(|k| *k != latest && !verify(*k))
+            .collect();
+        for k in &stale {
+            self.chord.down.remove(k);
+        }
+        if !stale.is_empty() {
+            tracing::debug!("ignoring stale held keys: {stale:?}");
+            self.chord.active = false;
+        }
+        stale.is_empty()
+    }
+
     /// Forget all held keys, releasing the chord if it was held.
     pub fn reset(&mut self) {
         self.chord.down.clear();
+        self.esc_down = false;
         if std::mem::take(&mut self.chord.active) {
             let events = self.gesture.on_key(false, Instant::now());
             self.emit(events);
@@ -324,5 +380,89 @@ mod tests {
         assert!(crate::insert::detect_wayland(None, Some("wayland")));
         assert!(!crate::insert::detect_wayland(None, Some("x11")));
         assert!(!crate::insert::detect_wayland(None, None));
+    }
+
+    #[test]
+    fn reset_clears_held_escape_so_the_next_press_cancels() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut core = Core::new(
+            Binding {
+                keys: vec![Key::Fn],
+            },
+            tx,
+        );
+        core.armed = true;
+        core.handle(Key::Escape, true);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Cancel);
+        core.reset(); // e.g. the macOS tap was disabled and the Esc key-up was missed
+        core.handle(Key::Escape, true);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Cancel);
+    }
+
+    #[test]
+    fn stuck_modifier_is_not_reported_as_a_held_chord() {
+        // Win+L: the Win key-up goes to the lock screen, so the tracker thinks Win is still down.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut core = Core::new(
+            Binding {
+                keys: vec![Key::ControlLeft, Key::MetaLeft],
+            },
+            tx,
+        );
+        let win_physically_down = Arc::new(AtomicBool::new(false));
+        let flag = win_physically_down.clone();
+        core.set_verifier(Box::new(move |k| {
+            k != Key::MetaLeft || flag.load(Ordering::SeqCst)
+        }));
+        core.handle(Key::MetaLeft, true); // stale
+        core.handle(Key::ControlLeft, true); // Ctrl alone must not start dictation
+        assert!(
+            rx.try_recv().is_err(),
+            "stuck Win must not complete the chord"
+        );
+        // The user now really presses Win while Ctrl is held: the chord works again.
+        win_physically_down.store(true, Ordering::SeqCst);
+        core.handle(Key::MetaLeft, true);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Pressed);
+        core.handle(Key::MetaLeft, false);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Released);
+    }
+
+    #[test]
+    fn verified_chord_is_reported_normally() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut core = Core::new(
+            Binding {
+                keys: vec![Key::ControlLeft, Key::MetaLeft],
+            },
+            tx,
+        );
+        core.set_verifier(Box::new(|_| true));
+        core.handle(Key::ControlLeft, true);
+        core.handle(Key::MetaLeft, true);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Pressed);
+    }
+
+    #[test]
+    fn retry_trigger_fires_once_per_accessibility_grant() {
+        let mut retried = false;
+        // Not granted yet: nothing, and the memory stays clear.
+        assert!(!retry_hotkey_start(true, false, &mut retried, false));
+        // Granted while the slot is empty: retry once.
+        assert!(retry_hotkey_start(true, true, &mut retried, false));
+        // Still granted and still empty (the retry failed): do not hammer.
+        assert!(!retry_hotkey_start(true, true, &mut retried, false));
+        // Revoked then granted again: a new grant retries.
+        assert!(!retry_hotkey_start(true, false, &mut retried, false));
+        assert!(retry_hotkey_start(true, true, &mut retried, false));
+        // A running service never needs a retry.
+        let mut retried = false;
+        assert!(!retry_hotkey_start(false, true, &mut retried, true));
+    }
+
+    #[test]
+    fn retry_trigger_fires_when_onboarding_completes() {
+        let mut retried = true;
+        assert!(retry_hotkey_start(true, false, &mut retried, true));
     }
 }

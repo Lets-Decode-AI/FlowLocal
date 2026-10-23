@@ -31,6 +31,10 @@ fn open_main_window(app: &AppHandle, route: Option<&str>) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window("main") {
         w.show()?;
         w.set_focus()?;
+        if let Some(route) = route {
+            // The page is already running: switch its hash route.
+            w.eval(format!("location.hash = '#{route}';"))?;
+        }
         return Ok(());
     }
     let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -229,6 +233,19 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }),
             app_name: Arc::new(insert::frontmost_app_name),
+            mic_denied: Arc::new(permissions::microphone_denied),
+            on_no_model: Arc::new({
+                let h = handle.clone();
+                move || {
+                    // Window work belongs on the main thread; this runs on the controller task.
+                    let app = h.clone();
+                    let _ = h.run_on_main_thread(move || {
+                        if let Err(e) = open_main_window(&app, Some("/models")) {
+                            tracing::warn!("could not open the Models page: {e}");
+                        }
+                    });
+                }
+            }),
         })
     });
     tracing::info!("dictation controller started");
@@ -246,6 +263,7 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         hf,
         hk_tx: Mutex::new(hk_tx),
         hotkey_starting,
+        hotkey_grant_retried: std::sync::atomic::AtomicBool::new(false),
         dictation_state: state_cache,
         paused: std::sync::atomic::AtomicBool::new(false),
         pause_item: Mutex::default(),
@@ -269,6 +287,12 @@ pub fn run() {
         )
         .try_init();
     tauri::Builder::default()
+        // Must be the first plugin: a second launch hands over to this instance and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Err(e) = open_main_window(app, None) {
+                tracing::warn!("could not open the main window for a second launch: {e}");
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,

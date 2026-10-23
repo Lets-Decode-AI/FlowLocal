@@ -33,6 +33,9 @@ fn map(key: rdev::Key) -> Option<Key> {
 const READY_WAIT: Duration = Duration::from_millis(300);
 
 pub fn start(core: Arc<Mutex<Core>>, stopped: Arc<AtomicBool>) -> Result<(), HotkeyError> {
+    // Discard modifiers whose release was missed (Win+L, Alt+Tab...) before reporting a chord.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    super::lock(&core).set_verifier(Box::new(super::physical::is_down));
     start_with(
         move || {
             rdev::listen(move |event| {

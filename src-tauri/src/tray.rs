@@ -2,7 +2,7 @@
 //! installed set or the active model changes.
 
 use tauri::menu::{CheckMenuItem, Submenu};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::app_state::AppState;
 
@@ -13,7 +13,7 @@ pub struct ModelsMenu(pub Submenu<tauri::Wry>);
 
 /// `(id, name, active)` for every installed model.
 fn entries(st: &AppState) -> Vec<(String, String, bool)> {
-    let active = st.models.active().map(|m| m.entry.id);
+    let active = st.models.ensure_active().map(|m| m.entry.id);
     st.models
         .installed()
         .into_iter()
@@ -81,6 +81,7 @@ pub fn handle_model_click(app: &AppHandle, model_id: &str) {
         tracing::warn!("tray set_active failed: {e:#}");
     }
     refresh_models_menu(app);
+    let _ = app.emit(crate::events::MODELS_CHANGED, ());
 }
 
 #[cfg(test)]
