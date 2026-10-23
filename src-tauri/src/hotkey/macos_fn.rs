@@ -1,7 +1,8 @@
-//! macOS backend: a listen-only CGEventTap on a dedicated thread with its
-//! own run loop. Listen-only means events are never swallowed (Esc still
-//! reaches the focused app). Requires the Accessibility / Input Monitoring
-//! permission; without it tap creation fails and we report `TapUnavailable`.
+//! macOS backend: an active CGEventTap on a dedicated thread with its own run
+//! loop. The callback returns `Keep` for every event, so events are never
+//! swallowed or modified (Esc still reaches the focused app). An active tap
+//! is gated by the Accessibility permission only; without it tap creation
+//! fails and we report `TapUnavailable`.
 use super::{Core, HotkeyError, Key};
 use core_foundation::runloop::{CFRunLoop, kCFRunLoopCommonModes, kCFRunLoopDefaultMode};
 use core_graphics::event::{
@@ -84,7 +85,7 @@ fn run(
     let tap = CGEventTap::new(
         CGEventTapLocation::Session,
         CGEventTapPlacement::HeadInsertEventTap,
-        CGEventTapOptions::ListenOnly,
+        CGEventTapOptions::Default,
         vec![
             CGEventType::FlagsChanged,
             CGEventType::KeyDown,
