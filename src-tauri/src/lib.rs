@@ -224,7 +224,14 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             recorder: recorder.clone(),
             stt: Arc::new(stt.clone()),
             models: Arc::new(models.clone()),
-            inserter: Arc::new(insert::ClipboardInserter::system()),
+            inserter: Arc::new(insert::ClipboardInserter::system(Arc::new({
+                let h = handle.clone();
+                move |job| {
+                    if let Err(e) = h.run_on_main_thread(job) {
+                        tracing::warn!("could not schedule the paste on the main thread: {e}");
+                    }
+                }
+            }))),
             store: store.clone(),
             emit,
             arm_esc: Arc::new(move |armed| {
