@@ -39,7 +39,25 @@ fn open_main_window(app: &AppHandle, route: Option<&str>) -> tauri::Result<()> {
     }
     let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("FlowLocal")
-        .inner_size(960.0, 640.0);
+        .inner_size(900.0, 620.0)
+        .min_inner_size(760.0, 520.0);
+    #[cfg(target_os = "macos")]
+    {
+        // Overlay title bar with inset traffic lights; the sidebar region shows window vibrancy.
+        // The page keeps the content area opaque, so only the sidebar is translucent.
+        b = b
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true)
+            .traffic_light_position(tauri::LogicalPosition::new(16.0, 20.0))
+            .transparent(true)
+            .effects(tauri::utils::config::WindowEffectsConfig {
+                effects: vec![tauri::window::Effect::Sidebar],
+                state: Some(tauri::window::EffectState::Active),
+                radius: None,
+                color: None,
+                interactive: false,
+            });
+    }
     if let Some(route) = route {
         // Hash route, applied before the page's own scripts run.
         b = b.initialization_script(format!("if (!location.hash) location.hash = '#{route}';"));

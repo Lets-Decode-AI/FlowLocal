@@ -1,15 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type CatalogEntry, type DownloadProgress, type HfRepoSummary, type Inspection, type InstalledModelDto } from '../ipc';
 import ModelRow from '../components/ModelRow';
+import Button from '../components/ui/Button';
+import Group from '../components/ui/Group';
+import Icon from '../components/ui/Icon';
+import Row from '../components/ui/Row';
+import Segmented from '../components/ui/Segmented';
+import SearchField from '../components/ui/SearchField';
 import { useToast } from '../components/Toasts';
-import { errMsg, fmtBytes } from '../lib/format';
+import { errMsg, fmtBytes, languageLabel } from '../lib/format';
 import { useEvent } from '../lib/hooks';
 
-type Tab = 'installed' | 'catalog' | 'hf';
-const TABS: [Tab, string][] = [['installed', 'Installed'], ['catalog', 'Catalog'], ['hf', 'Search Hugging Face']];
+type Tab = 'installed' | 'library' | 'hf';
+const TABS: { value: Tab; label: string }[] = [
+  { value: 'installed', label: 'Installed' },
+  { value: 'library', label: 'Library' },
+  { value: 'hf', label: 'Hugging Face' },
+];
 
 const size = (e: CatalogEntry) => fmtBytes(e.files.reduce((n, f) => n + f.size, 0));
-const meta = (e: CatalogEntry, extra?: string) => [e.languages.length > 6 ? `${e.languages.length} languages` : e.languages.join(', '), extra ?? size(e)].join(' · ');
+const meta = (e: CatalogEntry, bytes?: string) => `${languageLabel(e.languages)} · ${bytes ?? size(e)}`;
 
 export default function Models() {
   const toast = useToast();
@@ -57,7 +67,7 @@ export default function Models() {
     onCancel: () => run(() => api.modelCancel(id), () => setProgress(({ [id]: _, ...rest }) => rest)),
     onActivate: () => run(() => api.modelSetActive(id)),
     onDelete: () => {
-      if (window.confirm('Delete this model from disk? You can download it again later.')) {
+      if (window.confirm('Delete this model? You can download it again later.')) {
         run(() => api.modelDelete(id), () => setProgress(({ [id]: _, ...rest }) => rest));
       }
     },
@@ -70,41 +80,40 @@ export default function Models() {
 
   return (
     <div className="page">
-      <header className="page-head">
+      <header className="page-head page-head-row">
         <h1>Models</h1>
-        <p className="muted">Speech models run entirely on this computer.</p>
+        <Segmented options={TABS} value={tab} onChange={setTab} />
       </header>
-      <div className="tabs" role="tablist">
-        {TABS.map(([k, label]) => (
-          <button key={k} role="tab" aria-selected={tab === k} className={`tab${tab === k ? ' tab-on' : ''}`} onClick={() => setTab(k)}>{label}</button>
-        ))}
-      </div>
 
       {tab === 'installed' && (
-        <section className="list">
+        <>
           {installed.length === 0 && inFlight.length === 0 && (
             <div className="empty">
-              <div className="empty-title">No models installed yet</div>
-              <p>Download a model from the catalog to start dictating.</p>
-              <button className="btn btn-primary" onClick={() => setTab('catalog')}>Browse catalog</button>
+              <span className="empty-icon" aria-hidden="true"><Icon name="models" size={28} /></span>
+              <div className="empty-title">No models installed</div>
+              <p className="muted">Download a speech model to start dictating.</p>
+              <Button variant="primary" onClick={() => setTab('library')}>Browse the library</Button>
             </div>
           )}
-          {installed.map((m) => (
-            <ModelRow key={m.id} id={m.id} name={m.name} meta={meta(m, fmtBytes(m.diskBytes))} installed active={m.active} progress={progress[m.id]} {...actions(m.id)} />
-          ))}
-          {inFlight.map((p) => (
-            <ModelRow key={p.modelId} id={p.modelId} name={nameOf(p.modelId)} meta={typeof p.status === 'object' ? 'Failed' : 'Downloading'} installed={false} active={false} progress={p} {...actions(p.modelId)} />
-          ))}
-          {installed.length > 0 && <div className="foot muted">Disk usage: {fmtBytes(totalDisk)}</div>}
-        </section>
+          {(installed.length > 0 || inFlight.length > 0) && (
+            <Group footer={installed.length > 0 ? `Installed models use ${fmtBytes(totalDisk)} on this computer.` : undefined}>
+              {installed.map((m) => (
+                <ModelRow key={m.id} id={m.id} name={m.name} meta={meta(m, fmtBytes(m.diskBytes))} installed active={m.active} progress={progress[m.id]} {...actions(m.id)} />
+              ))}
+              {inFlight.map((p) => (
+                <ModelRow key={p.modelId} id={p.modelId} name={nameOf(p.modelId)} meta={typeof p.status === 'object' ? 'Not installed' : 'Downloading'} installed={false} active={false} progress={p} {...actions(p.modelId)} />
+              ))}
+            </Group>
+          )}
+        </>
       )}
 
-      {tab === 'catalog' && (
-        <section className="list">
+      {tab === 'library' && (
+        <Group footer="Models run on this computer. Your audio is never uploaded.">
           {catalog.map((e) => (
-            <ModelRow key={e.id} id={e.id} name={e.name} meta={meta(e) + (e.notes ? ` · ${e.notes}` : '')} installed={installedIds.has(e.id)} active={installed.find((m) => m.id === e.id)?.active ?? false} progress={progress[e.id]} {...actions(e.id)} />
+            <ModelRow key={e.id} id={e.id} name={e.name} meta={meta(e)} note={e.notes || undefined} installed={installedIds.has(e.id)} active={installed.find((m) => m.id === e.id)?.active ?? false} progress={progress[e.id]} {...actions(e.id)} />
           ))}
-        </section>
+        </Group>
       )}
 
       {tab === 'hf' && <HfSearch progress={progress} installedIds={installedIds} onInstalled={refresh} />}
@@ -161,33 +170,42 @@ function HfSearch({ progress, installedIds, onInstalled }: { progress: Record<st
   };
 
   return (
-    <section>
-      <input className="input" placeholder="Search Hugging Face for sherpa-onnx models…" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="list">
-        {results === null && <div className="empty"><p>Search for a repository, then inspect it to check it is compatible.</p></div>}
-        {results?.length === 0 && !loading && <div className="empty"><p>No repositories found.</p></div>}
-        {results?.map((r) => {
-          const ins = inspections[r.repo];
-          return (
-            <div className="row" key={r.repo}>
-              <div className="row-main">
-                <div className="row-title">{r.repo}</div>
-                <div className="row-sub">{r.downloads.toLocaleString()} downloads · {r.likes} likes</div>
-                {ins?.kind === 'incompatible' && <div className="row-error">{ins.reason}</div>}
-                {ins?.kind === 'compatible' && <div className="row-sub">Compatible · {ins.engine} · {size(ins)}</div>}
-                {ins?.kind === 'compatible' && progress[ins.id] && <div className="row-sub">{typeof progress[ins.id].status === 'string' ? progress[ins.id].status as string : 'Failed'}</div>}
-              </div>
-              <div className="row-actions">
-                {!ins && <button className="btn" onClick={() => inspect(r.repo)}>Inspect</button>}
-                {ins?.kind === 'compatible' && !installedIds.has(ins.id) && (
-                  <button className="btn btn-primary" onClick={() => { const { kind: _k, ...entry } = ins; install(entry); }}>Install</button>
-                )}
-                {ins?.kind === 'compatible' && installedIds.has(ins.id) && <span className="badge">Installed</span>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
+    <>
+      <SearchField label="Search Hugging Face" placeholder="Search Hugging Face" value={q} onChange={setQ} />
+      {results === null && <p className="muted empty-note">Search for a sherpa-onnx model repository, then check that it works with FlowLocal.</p>}
+      {results?.length === 0 && !loading && <p className="muted empty-note">No repositories found.</p>}
+      {results && results.length > 0 && (
+        <Group>
+          {results.map((r) => {
+            const ins = inspections[r.repo];
+            const status = ins?.kind === 'compatible' ? progress[ins.id]?.status : undefined;
+            return (
+              <Row
+                key={r.repo}
+                label={r.repo}
+                detail={
+                  <>
+                    {r.downloads.toLocaleString()} downloads · {r.likes} likes
+                    {ins?.kind === 'incompatible' && <><br /><span className="ui-row-error">{ins.reason}</span></>}
+                    {ins?.kind === 'compatible' && <><br />Works with FlowLocal · {ins.engine} · {size(ins)}</>}
+                    {status && <><br />{typeof status === 'string' ? status : 'Download failed'}</>}
+                  </>
+                }
+                accessory={
+                  <>
+                    {!ins && <Button onClick={() => inspect(r.repo)}>Inspect</Button>}
+                    {ins?.kind === 'incompatible' && <span className="ui-warn"><Icon name="warning" size={14} />Not compatible</span>}
+                    {ins?.kind === 'compatible' && !installedIds.has(ins.id) && (
+                      <Button variant="primary" onClick={() => { const { kind: _k, ...entry } = ins; install(entry); }}>Install</Button>
+                    )}
+                    {ins?.kind === 'compatible' && installedIds.has(ins.id) && <span className="ui-ok"><Icon name="check" size={14} />Installed</span>}
+                  </>
+                }
+              />
+            );
+          })}
+        </Group>
+      )}
+    </>
   );
 }

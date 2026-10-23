@@ -9,7 +9,7 @@
 - [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass
 - [ ] `npx tsc --noEmit` and `npx vitest run` pass
 - [ ] Docs updated (README, CONTRIBUTING, `docs/`) where behavior or setup changed
-- [ ] If platform-specific code changed, I noted which OSes I tested on
+- [ ] If I changed platform-specific code, I noted which OSes I tested on
 
 ## Testing notes
 

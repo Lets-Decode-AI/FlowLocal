@@ -22,6 +22,8 @@ pub struct PermissionsStatus {
 pub enum PermKind {
     Microphone,
     Accessibility,
+    /// Keyboard pane, for the Globe key setting.
+    Keyboard,
 }
 
 /// `AVAuthorizationStatus` raw value -> [`Perm`].
@@ -53,6 +55,7 @@ pub fn settings_url(kind: PermKind) -> &'static str {
         PermKind::Accessibility => {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         }
+        PermKind::Keyboard => "x-apple.systempreferences:com.apple.Keyboard-Settings.extension",
     }
 }
 
@@ -190,5 +193,15 @@ mod tests {
     fn settings_urls_match_brief() {
         assert!(settings_url(PermKind::Microphone).ends_with("?Privacy_Microphone"));
         assert!(settings_url(PermKind::Accessibility).ends_with("?Privacy_Accessibility"));
+        assert_eq!(
+            settings_url(PermKind::Keyboard),
+            "x-apple.systempreferences:com.apple.Keyboard-Settings.extension"
+        );
+    }
+
+    #[test]
+    fn keyboard_kind_deserializes_from_the_ipc_name() {
+        let k: PermKind = serde_json::from_str("\"keyboard\"").unwrap();
+        assert_eq!(k, PermKind::Keyboard);
     }
 }

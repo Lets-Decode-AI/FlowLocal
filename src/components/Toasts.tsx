@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
 import { useEvent } from '../lib/hooks';
+import Icon from './ui/Icon';
 
 interface Item { id: number; level: string; message: string }
 type Push = (message: string, level?: string) => void;
@@ -20,7 +21,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div className="toasts" role="status" aria-live="polite">
         {items.map((t) => (
-          <div key={t.id} className={`toast toast-${t.level}`}>{t.message}</div>
+          <div key={t.id} className={`toast toast-${t.level}`}>
+            {(t.level === 'error' || t.level === 'warning') && <Icon name="warning" />}
+            <span>{t.message}</span>
+          </div>
         ))}
       </div>
     </Ctx.Provider>

@@ -17,13 +17,13 @@ pub use worker::{SttHandle, SttWorker};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SttError {
-    #[error("could not load speech model: {0}")]
+    #[error("Could not load the speech model. Details: {0}")]
     LoadFailed(String),
-    #[error("speech engine failed: {0}")]
+    #[error("The speech engine failed. Details: {0}")]
     EngineFailed(String),
-    #[error("transcription cancelled")]
+    #[error("Transcription was cancelled.")]
     Cancelled,
-    #[error("speech worker is not running")]
+    #[error("The speech worker is not running.")]
     WorkerGone,
 }
 

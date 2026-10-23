@@ -11,12 +11,18 @@ export default function App() {
   return (
     <ToastProvider>
       {route === '/onboarding' ? (
-        <Onboarding />
+        <>
+          <div className="content-drag onb-drag" data-tauri-drag-region />
+          <Onboarding />
+        </>
       ) : (
         <div className="shell">
           <Sidebar route={route} />
           <main className="content">
-            {route === '/models' ? <Models /> : route === '/settings' ? <Settings /> : <History />}
+            <div className="content-drag" data-tauri-drag-region />
+            <div className="content-body">
+              {route === '/models' ? <Models /> : route === '/settings' ? <Settings /> : <History />}
+            </div>
           </main>
         </div>
       )}

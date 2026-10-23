@@ -1,5 +1,5 @@
 name: Model request
-description: Ask for a speech model to be added to the catalog
+description: Ask for a speech model to be added to the library
 title: "model: "
 labels: ["model"]
 body:
@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Models must be in a format sherpa-onnx can run (transducer, Whisper, Moonshine or SenseVoice).
-        You can also add one yourself: see "Adding a model to the catalog" in CONTRIBUTING.md.
+        You can also add one yourself. See "Adding a model to the catalog" in CONTRIBUTING.md.
   - type: input
     id: repo
     attributes:
@@ -35,7 +35,7 @@ body:
   - type: textarea
     id: why
     attributes:
-      label: Why add it?
+      label: Why should we add it?
       description: Accuracy, speed, size, language coverage, license.
     validations:
       required: true

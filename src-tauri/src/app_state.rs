@@ -184,10 +184,10 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 pub fn validate_settings(s: &Settings) -> Result<(), String> {
     if s.hotkey.keys.is_empty() {
-        return Err("hotkey must contain at least one key".into());
+        return Err("Choose at least one key for the shortcut.".into());
     }
     if s.hotkey.keys.contains(&crate::hotkey::Key::Escape) {
-        return Err("Esc cannot be part of the hotkey (it cancels dictation)".into());
+        return Err("Esc cannot be part of the shortcut because it cancels dictation.".into());
     }
     Ok(())
 }
@@ -204,7 +204,7 @@ pub fn commit_settings(
     let old = lock(current).clone();
     if new.launch_at_login != old.launch_at_login {
         auto.set(new.launch_at_login)
-            .map_err(|e| format!("could not change launch at login: {e}"))?;
+            .map_err(|e| format!("Could not change the open at login setting. Details: {e}"))?;
     }
     if let Err(e) = store.set_setting(SETTINGS_KEY, &new) {
         if new.launch_at_login != old.launch_at_login {

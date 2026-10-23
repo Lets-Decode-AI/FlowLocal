@@ -93,7 +93,7 @@ pub fn validate_id(id: &str) -> Result<()> {
         || dir.chars().all(|c| c == '.')
         || dir.contains(['/', '\\'])
     {
-        return Err(anyhow!("invalid model id {id:?}"));
+        return Err(anyhow!("This model has an invalid id."));
     }
     Ok(())
 }
@@ -107,7 +107,10 @@ pub fn validate_entry(entry: &CatalogEntry) -> Result<()> {
                 .components()
                 .all(|c| matches!(c, std::path::Component::Normal(_)));
         if !ok {
-            return Err(anyhow!("Invalid file path: {}", f.path));
+            return Err(anyhow!(
+                "This model lists an invalid file path: {}.",
+                f.path
+            ));
         }
     }
     Ok(())
@@ -319,7 +322,7 @@ impl Manager {
     pub fn set_active(&self, id: &str) -> Result<()> {
         validate_id(id)?;
         if !self.installed().iter().any(|m| m.entry.id == id) {
-            return Err(anyhow!("model {id} is not installed"));
+            return Err(anyhow!("That model is not installed."));
         }
         self.store.set_setting(ACTIVE_KEY, &id.to_string())
     }
@@ -456,7 +459,10 @@ impl Manager {
             if !ok || f.path.is_empty() {
                 return Some((
                     0,
-                    DlStatus::Failed(format!("Invalid file path: {}", f.path)),
+                    DlStatus::Failed(format!(
+                        "This model lists an invalid file path: {}.",
+                        f.path
+                    )),
                     None,
                 ));
             }
@@ -469,7 +475,7 @@ impl Manager {
         let free = (self.free_space)(&self.root);
         if free < remaining {
             let msg = format!(
-                "Not enough disk space: need {} MB, {} MB free",
+                "There is not enough disk space. The model needs {} MB and {} MB is free.",
                 remaining >> 20,
                 free >> 20
             );
@@ -542,7 +548,13 @@ impl Manager {
                     Ok(()) => break,
                     Err(DownloadError::Cancelled) => return None,
                     Err(DownloadError::Checksum) => {
-                        return Some((0, DlStatus::Failed("Checksum mismatch".into()), None));
+                        return Some((
+                            0,
+                            DlStatus::Failed(
+                                "The downloaded file did not match its checksum.".into(),
+                            ),
+                            None,
+                        ));
                     }
                     Err(e) if attempt >= MAX_RETRIES => {
                         let done = base_done + self.file_done(&entry, f);

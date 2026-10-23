@@ -113,11 +113,14 @@ pub fn spawn_hotkey_start(
                     None
                 }
                 Err(HotkeyError::Unsupported) => {
-                    notice = Some(("warning", "Global hotkey unavailable on Wayland".into()));
+                    notice = Some((
+                        "warning",
+                        "The global shortcut is not available on Wayland.".into(),
+                    ));
                     None
                 }
                 Err(e) => {
-                    notice = Some(("error", format!("Global hotkey unavailable: {e}")));
+                    notice = Some(("error", format!("The global shortcut is unavailable. {e}")));
                     None
                 }
             };
@@ -140,7 +143,7 @@ pub fn spawn_hotkey_start(
 }
 
 /// Flow Bar / toast text when the macOS event tap cannot be created.
-pub const TAP_UNAVAILABLE_NOTICE: &str = "Grant Accessibility to enable the hotkey";
+pub const TAP_UNAVAILABLE_NOTICE: &str = "Grant Accessibility access to turn on the shortcut.";
 
 /// Re-attempt hotkey start-up from the current app state (idempotent: a running or starting
 /// service makes this a no-op).
@@ -297,7 +300,7 @@ pub fn model_install(
             .get(&id)
             .cloned()
             .ok_or_else(|| format!("unknown model {id}"))?,
-        (None, None) => return Err("model_install needs an id or an entry".into()),
+        (None, None) => return Err("Choose a model to install.".into()),
     };
     crate::models::validate_entry(&entry).map_err(err)?;
     st.models.install(entry);

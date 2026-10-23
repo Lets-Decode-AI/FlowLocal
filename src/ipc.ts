@@ -10,7 +10,7 @@ export interface PermissionsStatus {
   microphone: Perm;
   accessibility: Perm;
 }
-export type PermKind = 'microphone' | 'accessibility';
+export type PermKind = 'microphone' | 'accessibility' | 'keyboard';
 
 export type DictationState =
   | { kind: 'idle' }

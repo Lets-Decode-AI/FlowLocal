@@ -1,11 +1,11 @@
 name: Bug report
-description: Something is not working as expected
+description: Something does not work as expected
 title: "bug: "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
-      value: Thanks for the report. Please search existing issues first.
+      value: Thanks for the report. Search existing issues first.
   - type: dropdown
     id: os
     attributes:
@@ -71,5 +71,5 @@ body:
     id: logs
     attributes:
       label: Logs or screenshots
-      description: Please remove anything private. Dictated text may be sensitive.
+      description: Remove anything private. Dictated text can be sensitive.
       render: shell

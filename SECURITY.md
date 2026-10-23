@@ -6,17 +6,17 @@ FlowLocal is pre-1.0. Security fixes are made against the latest release and `ma
 
 ## Reporting a vulnerability
 
-Please **do not open a public issue** for security problems.
+Do not open a public issue for security problems.
 
 Report privately through GitHub Security Advisories:
 <https://github.com/Lets-Decode-AI/FlowLocal/security/advisories/new>
-(repository **Security** tab > **Report a vulnerability**).
+(repository **Security** tab, then **Report a vulnerability**).
 
 Include what you found, steps to reproduce, the affected version and OS, and the impact you expect.
-We aim to acknowledge reports within a few days and will coordinate a fix and disclosure with you.
+We aim to acknowledge reports within a few days. We will work with you on a fix and on disclosure.
 
 ## Scope notes
 
-FlowLocal processes audio locally and stores history in a local SQLite database. Areas of particular interest:
-the model downloader (integrity checks, redirects), the Hugging Face token (kept in the OS keychain), clipboard handling,
-and the Tauri command surface exposed to the webview.
+FlowLocal processes audio on your device and stores history in a local SQLite database. We are most interested in reports about:
+the model downloader (integrity checks and redirects), the Hugging Face token (kept in the system keychain), clipboard handling,
+and the Tauri commands exposed to the webview.
