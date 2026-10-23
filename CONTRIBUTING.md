@@ -7,7 +7,7 @@ Thanks for helping out! This project follows the [Code of Conduct](CODE_OF_CONDU
 1. Install [Rust via rustup](https://rustup.rs) (the toolchain is pinned in `rust-toolchain.toml` and includes `rustfmt` and `clippy`).
 2. Install Node.js 20 or newer.
 3. Install the [Tauri 2 platform prerequisites](https://tauri.app/start/prerequisites/). On Ubuntu:
-   `sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libxdo-dev`
+   `sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libxdo-dev libxtst-dev libxi-dev cmake clang`
 4. Fork and clone, then:
 
 ```bash
