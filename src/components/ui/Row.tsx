@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import Icon, { type IconName } from './Icon';
 
+/** Note: when `onClick` is set the row is a button, so `accessory` must not contain interactive elements. */
 interface RowProps {
   label: ReactNode;
   detail?: ReactNode;

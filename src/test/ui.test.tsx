@@ -27,6 +27,23 @@ describe('ui primitives', () => {
     expect(onChange).toHaveBeenCalledWith('b');
   });
 
+  it('segmented_arrow_keys_move_selection', () => {
+    const onChange = vi.fn();
+    render(<Segmented options={[{ value: 'a', label: 'One' }, { value: 'b', label: 'Two' }, { value: 'c', label: 'Three' }]} value="a" onChange={onChange} />);
+    const one = screen.getByRole('tab', { name: 'One' });
+    expect(one.tabIndex).toBe(0);
+    expect(screen.getByRole('tab', { name: 'Two' }).tabIndex).toBe(-1);
+    fireEvent.keyDown(one, { key: 'ArrowRight' });
+    expect(onChange).toHaveBeenLastCalledWith('b');
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Two' }));
+    fireEvent.keyDown(one, { key: 'ArrowLeft' });
+    expect(onChange).toHaveBeenLastCalledWith('c');
+    fireEvent.keyDown(one, { key: 'End' });
+    expect(onChange).toHaveBeenLastCalledWith('c');
+    fireEvent.keyDown(one, { key: 'Home' });
+    expect(onChange).toHaveBeenLastCalledWith('a');
+  });
+
   it('keycaps_render_mac_glyphs', () => {
     const { container, unmount } = render(<>{keycapsFor({ keys: ['ControlLeft', 'AltRight', 'ShiftLeft', 'MetaLeft', 'Fn'] }, 'mac')}</>);
     expect(Array.from(container.querySelectorAll('kbd')).map((k) => k.textContent)).toEqual(['⌃', '⌥', '⇧', '⌘', 'fn']);

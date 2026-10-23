@@ -32,7 +32,7 @@ export default function Sidebar({ route }: { route: string }) {
           <a key={n.label} href={`#${n.route}`} className={`nav${route === n.route ? ' nav-on' : ''}`} aria-current={route === n.route ? 'page' : undefined}><Icon name={n.icon} />{n.label}</a>
         ))}
       </nav>
-      <div className="side-status"><span className={`status-dot${state.kind !== 'idle' ? ` status-${state.kind}` : ''}`} />{statusText(state)}</div>
+      <div className="side-status" aria-live="polite"><span className={`status-dot${state.kind !== 'idle' ? ` status-${state.kind}` : ''}`} />{statusText(state)}</div>
     </aside>
   );
 }
