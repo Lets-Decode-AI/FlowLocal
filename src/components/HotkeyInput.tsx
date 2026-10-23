@@ -1,21 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Binding, Key } from '../ipc';
-
-const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
+import Button from './ui/Button';
 
 const CODE_TO_KEY: Record<string, Key> = {
   ControlLeft: 'ControlLeft', ControlRight: 'ControlRight', MetaLeft: 'MetaLeft', MetaRight: 'MetaRight',
   AltLeft: 'AltLeft', AltRight: 'AltRight', ShiftLeft: 'ShiftLeft', ShiftRight: 'ShiftRight', Space: 'Space', Fn: 'Fn',
 };
-
-const KEY_LABEL: Record<Key, string> = {
-  Fn: 'Fn', ControlLeft: 'Left Ctrl', ControlRight: 'Right Ctrl',
-  MetaLeft: isMac ? 'Left ⌘' : 'Left Win', MetaRight: isMac ? 'Right ⌘' : 'Right Win',
-  AltLeft: isMac ? 'Left ⌥' : 'Left Alt', AltRight: isMac ? 'Right ⌥' : 'Right Alt',
-  ShiftLeft: 'Left Shift', ShiftRight: 'Right Shift', Space: 'Space', Escape: 'Esc',
-};
-
-export const bindingLabel = (b: Binding) => b.keys.map((k) => KEY_LABEL[k]).join(' + ');
 
 const PRESETS: { label: string; keys: Key[] }[] = [
   { label: 'Fn', keys: ['Fn'] },
@@ -64,19 +54,15 @@ export default function HotkeyInput({ value, onChange }: { value: Binding; onCha
 
   return (
     <div className="hotkey">
-      <div className="hotkey-current" aria-live="polite">
-        {recording ? 'Press the keys… (Esc to cancel)' : bindingLabel(value)}
-      </div>
-      <div className="hotkey-actions">
+      <div className="hotkey-choices" role="group" aria-label="Shortcut choices">
         {PRESETS.map((p) => (
-          <button key={p.label} type="button" className={`chip${same(value, p.keys) ? ' chip-on' : ''}`} onClick={() => { setRecording(false); onChange({ keys: p.keys }); }}>
+          <Button key={p.label} aria-pressed={same(value, p.keys)} onClick={() => { setRecording(false); onChange({ keys: p.keys }); }}>
             {p.label}
-          </button>
+          </Button>
         ))}
-        <button type="button" className="chip" onClick={() => setRecording((r) => !r)}>
-          {recording ? 'Cancel' : 'Record…'}
-        </button>
+        <Button onClick={() => setRecording((r) => !r)}>{recording ? 'Cancel' : 'Record shortcut'}</Button>
       </div>
+      <div className="hotkey-status muted" aria-live="polite">{recording ? 'Press the keys. Press Esc to cancel.' : ''}</div>
     </div>
   );
 }

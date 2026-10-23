@@ -1,29 +1,23 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, type DictEntry, type Settings as S } from '../ipc';
 import HotkeyInput from '../components/HotkeyInput';
-import Toggle from '../components/Toggle';
 import { useToast } from '../components/Toasts';
+import Button from '../components/ui/Button';
+import Group from '../components/ui/Group';
+import IconButton from '../components/ui/IconButton';
+import { keycapsFor } from '../components/ui/Keycap';
+import Row from '../components/ui/Row';
+import Switch from '../components/ui/Switch';
 import { errMsg } from '../lib/format';
 
-const IDLE: [string, number | null][] = [['5 minutes', 5], ['10 minutes', 10], ['30 minutes', 30], ['Never', null]];
-
-function Row({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className="setting">
-      <div>
-        <div className="setting-title">{title}</div>
-        {hint && <div className="row-sub">{hint}</div>}
-      </div>
-      <div className="setting-control">{children}</div>
-    </div>
-  );
-}
+const IDLE: [string, number | null][] = [['After 5 minutes', 5], ['After 10 minutes', 10], ['After 30 minutes', 30], ['Never', null]];
 
 export default function Settings() {
   const toast = useToast();
   const [s, setS] = useState<S | null>(null);
   const [mics, setMics] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [changing, setChanging] = useState(false);
 
   const confirmed = useRef<S | null>(null); // last state the backend accepted
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -48,7 +42,7 @@ export default function Settings() {
         await api.settingsSet(next);
         confirmed.current = next;
       } catch (e) {
-        setError(errMsg(e)); // backend rejected it (invalid binding, autostart failure, …)
+        setError(errMsg(e)); // the backend rejected it, for example an invalid shortcut
         toast(errMsg(e), 'error');
       } finally {
         if (--pending.current === 0) setS(confirmed.current);
@@ -56,7 +50,7 @@ export default function Settings() {
     });
   };
 
-  if (!s) return <div className="page">{error && <div className="row-error">{error}</div>}</div>;
+  if (!s) return <div className="page">{error && <div className="banner-error" role="alert">{error}</div>}</div>;
 
   return (
     <div className="page">
@@ -64,34 +58,59 @@ export default function Settings() {
         <h1>Settings</h1>
       </header>
       {error && <div className="banner-error" role="alert">{error}</div>}
-      <section className="card">
-        <Row title="Dictation hotkey" hint="Hold to talk, double-tap to go hands-free.">
-          <HotkeyInput value={s.hotkey} onChange={(hotkey) => save({ hotkey })} />
-        </Row>
-        <Row title="Microphone">
-          <select className="input" aria-label="Microphone" value={s.mic ?? ''} onChange={(e) => save({ mic: e.target.value || null })}>
-            <option value="">System default</option>
-            {mics.map((m) => <option key={m} value={m}>{m}</option>)}
-            {s.mic && !mics.includes(s.mic) && <option value={s.mic}>{s.mic} (unavailable)</option>}
-          </select>
-        </Row>
-        <Row title="Show Flow Bar" hint="The small pill at the bottom of your screen.">
-          <Toggle label="Show Flow Bar" checked={s.showFlowbar} onChange={(showFlowbar) => save({ showFlowbar })} />
-        </Row>
-        <Row title="Unload model when idle" hint="Frees memory; the next dictation reloads it.">
-          <select className="input" aria-label="Unload model when idle" value={String(s.idleUnloadMin)} onChange={(e) => save({ idleUnloadMin: e.target.value === 'null' ? null : Number(e.target.value) })}>
-            {IDLE.map(([l, v]) => <option key={l} value={String(v)}>{l}</option>)}
-          </select>
-        </Row>
-        <Row title="Preload model at startup" hint="Faster first dictation, uses more memory.">
-          <Toggle label="Preload model at startup" checked={s.preload} onChange={(preload) => save({ preload })} />
-        </Row>
-        <Row title="Launch at login">
-          <Toggle label="Launch at login" checked={s.launchAtLogin} onChange={(launchAtLogin) => save({ launchAtLogin })} />
-        </Row>
-      </section>
-      <HfToken />
+
+      <Group title="Dictation" footer="Hold the shortcut to talk, or double-press it to keep listening hands-free.">
+        <Row
+          label="Shortcut"
+          accessory={
+            <>
+              <span role="group" aria-label="Current shortcut">{keycapsFor(s.hotkey)}</span>
+              <Button aria-expanded={changing} onClick={() => setChanging((c) => !c)}>Change</Button>
+            </>
+          }
+        />
+        {changing && (
+          <div className="ui-row ui-row-panel">
+            <HotkeyInput value={s.hotkey} onChange={(hotkey) => save({ hotkey })} />
+          </div>
+        )}
+        <Row
+          label="Microphone"
+          accessory={
+            <select className="ui-select" aria-label="Microphone" value={s.mic ?? ''} onChange={(e) => save({ mic: e.target.value || null })}>
+              <option value="">System default</option>
+              {mics.map((m) => <option key={m} value={m}>{m}</option>)}
+              {s.mic && !mics.includes(s.mic) && <option value={s.mic}>{s.mic} (not connected)</option>}
+            </select>
+          }
+        />
+        <Row
+          label="Show Flow Bar" detail="The small pill at the bottom of the screen."
+          accessory={<Switch label="Show Flow Bar" checked={s.showFlowbar} onChange={(showFlowbar) => save({ showFlowbar })} />}
+        />
+      </Group>
+
+      <Group title="Model" footer="Unloading the model frees memory. The next dictation loads it again.">
+        <Row
+          label="Unload when idle"
+          accessory={
+            <select className="ui-select" aria-label="Unload when idle" value={String(s.idleUnloadMin)} onChange={(e) => save({ idleUnloadMin: e.target.value === 'null' ? null : Number(e.target.value) })}>
+              {IDLE.map(([l, v]) => <option key={l} value={String(v)}>{l}</option>)}
+            </select>
+          }
+        />
+        <Row
+          label="Load at startup" detail="Makes the first dictation faster and uses more memory."
+          accessory={<Switch label="Load at startup" checked={s.preload} onChange={(preload) => save({ preload })} />}
+        />
+      </Group>
+
+      <Group title="General">
+        <Row label="Open at login" accessory={<Switch label="Open at login" checked={s.launchAtLogin} onChange={(launchAtLogin) => save({ launchAtLogin })} />} />
+      </Group>
+
       <Dictionary />
+      <HfToken />
     </div>
   );
 }
@@ -109,15 +128,13 @@ function HfToken() {
     }
   };
   return (
-    <section className="card">
-      <Row title="Hugging Face token" hint="Optional. Needed only for gated models. Stored in your OS keychain.">
-        <div className="inline">
-          <input className="input" type="password" aria-label="Hugging Face token" placeholder="hf_…" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} />
-          <button className="btn" disabled={!token.trim()} onClick={() => store(token.trim())}>Save</button>
-          <button className="btn btn-ghost" onClick={() => store(null)}>Remove</button>
-        </div>
-      </Row>
-    </section>
+    <Group title="Hugging Face" footer="Only needed to download gated or private models. The token is stored in your system keychain.">
+      <form className="ui-row ui-row-form" onSubmit={(e) => { e.preventDefault(); if (token.trim()) store(token.trim()); }}>
+        <input className="ui-field" type="password" aria-label="Hugging Face token" placeholder="Access token" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} />
+        <Button type="submit" disabled={!token.trim()}>Save</Button>
+        <Button variant="plain" onClick={() => store(null)}>Remove</Button>
+      </form>
+    </Group>
   );
 }
 
@@ -150,26 +167,20 @@ function Dictionary() {
   };
 
   return (
-    <section className="card">
-      <div className="setting-title">Personal dictionary</div>
-      <div className="row-sub">Names and jargon to spell correctly. Add a replacement to rewrite a term automatically.</div>
-      <form className="inline dict-add" onSubmit={(e) => { e.preventDefault(); add(); }}>
-        <input className="input" aria-label="Term" placeholder="Term" value={term} onChange={(e) => setTerm(e.target.value)} />
-        <input className="input" aria-label="Replacement" placeholder="Replacement (optional)" value={rep} onChange={(e) => setRep(e.target.value)} />
-        <button className="btn" type="submit" disabled={!term.trim()}>Add</button>
+    <Group title="Personal dictionary" footer="Add names and jargon so they are spelled correctly. A replacement rewrites the term as you dictate.">
+      {items.map((d) => (
+        <Row
+          key={d.id}
+          label={d.term}
+          detail={d.replacement ? `Replaced with ${d.replacement}` : undefined}
+          accessory={<IconButton icon="trash" label={`Remove ${d.term}`} tone="destructive" onClick={() => del(d.id)} />}
+        />
+      ))}
+      <form className="ui-row ui-row-form" onSubmit={(e) => { e.preventDefault(); add(); }}>
+        <input className="ui-field" aria-label="Term" placeholder="Term" value={term} onChange={(e) => setTerm(e.target.value)} />
+        <input className="ui-field" aria-label="Replacement" placeholder="Replacement (optional)" value={rep} onChange={(e) => setRep(e.target.value)} />
+        <Button type="submit" disabled={!term.trim()}>Add</Button>
       </form>
-      {items.length === 0 ? (
-        <div className="row-sub dict-empty">No custom terms yet.</div>
-      ) : (
-        <ul className="dict">
-          {items.map((d) => (
-            <li key={d.id}>
-              <span>{d.term}{d.replacement ? <span className="muted"> → {d.replacement}</span> : null}</span>
-              <button className="btn btn-ghost" aria-label={`Remove ${d.term}`} onClick={() => del(d.id)}>Remove</button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    </Group>
   );
 }

@@ -7,7 +7,7 @@ import { keycapsFor } from '../../components/ui/Keycap';
 import { errMsg } from '../../lib/format';
 import { navigate, useEvent } from '../../lib/hooks';
 import { StepFrame, type StepProps } from './Shell';
-import { useBinding } from './useBinding';
+import { useBinding } from '../../lib/useBinding';
 
 function describe(s: DictationState): string {
   switch (s.kind) {

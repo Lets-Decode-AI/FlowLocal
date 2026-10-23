@@ -6,23 +6,12 @@ import Button from '../../components/ui/Button';
 import Group from '../../components/ui/Group';
 import Icon from '../../components/ui/Icon';
 import Row from '../../components/ui/Row';
-import { errMsg, fmtBytes } from '../../lib/format';
+import { errMsg, fmtBytes, languageLabel } from '../../lib/format';
 import { useEvent } from '../../lib/hooks';
 import { StepFrame, type StepProps } from './Shell';
 import type { Downloads } from './useDownloads';
 
 const sizeOf = (e: CatalogEntry) => fmtBytes(e.files.reduce((n, f) => n + f.size, 0));
-
-function languageLabel(langs: string[]): string {
-  if (langs.length === 1) {
-    try {
-      return new Intl.DisplayNames(['en'], { type: 'language' }).of(langs[0]) ?? langs[0];
-    } catch {
-      return langs[0];
-    }
-  }
-  return `${langs.length} languages`;
-}
 
 function hardwareLabel(h: Partial<Hardware> | undefined): string {
   if (h?.appleSilicon) return 'Apple silicon';

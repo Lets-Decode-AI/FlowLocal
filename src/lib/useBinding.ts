@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type Binding, type Settings } from '../../ipc';
+import { api, type Binding, type Settings } from '../ipc';
 
 const DEFAULT: Binding = { keys: ['Fn'] };
 

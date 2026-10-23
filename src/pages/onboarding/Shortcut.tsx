@@ -8,7 +8,7 @@ import { currentPlatform, keycapsFor } from '../../components/ui/Keycap';
 import Row from '../../components/ui/Row';
 import { errMsg } from '../../lib/format';
 import { StepFrame, type StepProps } from './Shell';
-import { useBinding } from './useBinding';
+import { useBinding } from '../../lib/useBinding';
 
 export default function Shortcut({ onNext, onBack }: StepProps) {
   const toast = useToast();
