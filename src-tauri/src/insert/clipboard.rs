@@ -89,10 +89,11 @@ impl Clipboard for SystemClipboard {
     }
 
     fn restore(&mut self, s: ClipboardSnapshot) -> Result<()> {
-        // Empty clears the clipboard. Only text/image are preserved; file,
-        // HTML and RTF contents are not (Part 1).
+        // Only text/image are preserved; file and HTML/RTF contents are not, and rich text
+        // comes back as plain text. Empty is a no-op: it also stands for "unreadable", and
+        // clearing would wipe data we could not snapshot.
         self.run(move |cb| match s {
-            ClipboardSnapshot::Empty => cb.clear(),
+            ClipboardSnapshot::Empty => Ok(()),
             ClipboardSnapshot::Text(t) => cb.set_text(t),
             ClipboardSnapshot::Image(i) => cb.set_image(i),
         })??;
