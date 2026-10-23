@@ -20,7 +20,7 @@ jobs:
     name: Lint and test (ubuntu)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install system dependencies
         run: |
@@ -90,7 +90,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             bundles: appimage,deb
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
