@@ -110,11 +110,23 @@ describe('FlowBar', () => {
     vi.useFakeTimers();
     setState({ kind: 'transcribing' });
     setState({ kind: 'inserting' });
-    emit('toast', { level: 'warning', message: 'Copied \u2014 press \u2318V' });
+    emit('toast', { level: 'warning', message: 'Copied. Press \u2318V to paste.' });
     setState({ kind: 'idle' });
     emit('transcriptAdded', { id: 1 });
     expect(screen.queryByTestId('flowbar-done')).toBeNull();
-    expect(screen.getByText('Copied \u2014 press \u2318V')).toBeTruthy();
+    expect(screen.getByText('Copied. Press \u2318V to paste.')).toBeTruthy();
+  });
+
+  it('transcribing_shows_three_pulsing_dots', async () => {
+    await mount();
+    setState({ kind: 'transcribing' });
+    expect(screen.getAllByTestId('transcribing-dot')).toHaveLength(3);
+  });
+
+  it('toast_pill_has_an_icon_for_warnings_and_errors', async () => {
+    await mount();
+    emit('toast', { level: 'error', message: 'Nope' });
+    expect(screen.getByTestId('flowbar-pill').querySelector('svg')).toBeTruthy();
   });
 
   it('recording_takes_priority_over_a_toast', async () => {

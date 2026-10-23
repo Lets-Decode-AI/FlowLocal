@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, on, type DictationState, type Toast } from '../ipc';
 import Waveform from '../components/Waveform';
+import Icon from '../components/ui/Icon';
 
 const DONE_MS = 600;
 const TOAST_MS = 3000;
@@ -87,13 +88,25 @@ export default function FlowBar() {
             <Waveform level={level} />
           </>
         )}
-        {kind === 'transcribing' && <span className="fb-shimmer" />}
-        {kind === 'done' && (
-          <span data-testid="flowbar-done" className="fb-check">✓</span>
+        {kind === 'transcribing' && (
+          <span className="fb-dots" aria-hidden="true">
+            {[0, 1, 2].map((i) => <span key={i} data-testid="transcribing-dot" className="fb-tdot" style={{ animationDelay: `${i * 160}ms` }} />)}
+          </span>
         )}
-        {kind === 'toast' && toast && <span className="fb-toast-text">{toast.message}</span>}
+        {kind === 'done' && (
+          <span data-testid="flowbar-done" className="fb-check" role="img" aria-label="Done"><Icon name="check" size={18} /></span>
+        )}
+        {kind === 'toast' && toast && (
+          <>
+            <span className={`fb-icon fb-icon-${toast.level === 'error' ? 'error' : 'warning'}`}><Icon name="warning" size={16} /></span>
+            <span className="fb-toast-text">{toast.message}</span>
+          </>
+        )}
         {kind === 'error' && state.kind === 'error' && (
-          <span className="fb-error-text">{state.message}</span>
+          <>
+            <span className="fb-icon fb-icon-error"><Icon name="warning" size={16} /></span>
+            <span className="fb-error-text">{state.message}</span>
+          </>
         )}
       </div>
     </div>
