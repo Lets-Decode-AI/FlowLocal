@@ -161,6 +161,7 @@ export const EVENTS = {
   toast: 'app://toast',
   transcriptAdded: 'history://added',
   settingsChanged: 'settings://changed',
+  modelsChanged: 'models://changed',
 } as const;
 
 export interface EventPayloads {
@@ -171,6 +172,8 @@ export interface EventPayloads {
   toast: Toast;
   transcriptAdded: { id: number };
   settingsChanged: Settings;
+  /** The active model changed outside the Models page (tray). */
+  modelsChanged: null;
 }
 
 /** Subscribe to a backend event; resolves to the unlisten function. */

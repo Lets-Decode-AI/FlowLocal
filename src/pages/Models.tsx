@@ -34,6 +34,8 @@ export default function Models() {
     return () => window.removeEventListener('focus', refresh);
   }, [refresh]);
 
+  useEvent('modelsChanged', () => void refresh());
+
   useEvent('progress', (p) => {
     setProgress((m) => ({ ...m, [p.modelId]: p }));
     if (p.status === 'Installed') refresh();

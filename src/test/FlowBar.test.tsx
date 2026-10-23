@@ -82,4 +82,46 @@ describe('FlowBar', () => {
     expect(screen.queryByTestId('flowbar-done')).toBeNull();
     expect(screen.getByTestId('flowbar-idle')).toBeTruthy();
   });
+
+  it('shows_toast_message_in_the_pill_for_about_three_seconds', async () => {
+    await mount();
+    vi.useFakeTimers();
+    emit('toast', { level: 'warning', message: 'Grant Accessibility to enable the hotkey' });
+    expect(screen.getByText('Grant Accessibility to enable the hotkey')).toBeTruthy();
+    const pill = screen.getByTestId('flowbar-pill');
+    expect(pill.getAttribute('data-kind')).toBe('toast');
+    expect(pill.className).toContain('fb-toast-warning');
+    act(() => void vi.advanceTimersByTime(2900));
+    expect(screen.queryByText('Grant Accessibility to enable the hotkey')).toBeTruthy();
+    act(() => void vi.advanceTimersByTime(200));
+    expect(screen.queryByText('Grant Accessibility to enable the hotkey')).toBeNull();
+    expect(screen.getByTestId('flowbar-idle')).toBeTruthy();
+  });
+
+  it('toast_is_visible_even_when_flowbar_is_hidden_by_setting', async () => {
+    showFlowbar = false;
+    await mount();
+    emit('toast', { level: 'error', message: 'Could not save to history' });
+    expect(screen.getByText('Could not save to history')).toBeTruthy();
+  });
+
+  it('copied_only_shows_message_instead_of_check', async () => {
+    await mount();
+    vi.useFakeTimers();
+    setState({ kind: 'transcribing' });
+    setState({ kind: 'inserting' });
+    emit('toast', { level: 'warning', message: 'Copied \u2014 press \u2318V' });
+    setState({ kind: 'idle' });
+    emit('transcriptAdded', { id: 1 });
+    expect(screen.queryByTestId('flowbar-done')).toBeNull();
+    expect(screen.getByText('Copied \u2014 press \u2318V')).toBeTruthy();
+  });
+
+  it('recording_takes_priority_over_a_toast', async () => {
+    await mount();
+    emit('toast', { level: 'warning', message: 'hello' });
+    setState({ kind: 'recording', handsFree: false });
+    expect(screen.queryByText('hello')).toBeNull();
+    expect(screen.getByTestId('flowbar-pill').getAttribute('data-kind')).toBe('recording');
+  });
 });

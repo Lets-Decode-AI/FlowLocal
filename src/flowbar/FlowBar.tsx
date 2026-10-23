@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, on, type DictationState } from '../ipc';
+import { api, on, type DictationState, type Toast } from '../ipc';
 import Waveform from '../components/Waveform';
 
 const DONE_MS = 600;
+const TOAST_MS = 3000;
 
-type Kind = 'idle' | 'recording' | 'transcribing' | 'done' | 'error';
+type Kind = 'idle' | 'recording' | 'transcribing' | 'done' | 'error' | 'toast';
 
 export default function FlowBar() {
   const [state, setState] = useState<DictationState>({ kind: 'idle' });
   const [level, setLevel] = useState(0);
   const [show, setShow] = useState(true);
   const [done, setDone] = useState(false);
+  const [toast, setToast] = useState<Toast | null>(null);
   const prev = useRef<DictationState['kind']>('idle');
   const doneTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const flashDone = () => {
     clearTimeout(doneTimer.current);
@@ -40,11 +43,20 @@ export default function FlowBar() {
     add(on('level', setLevel));
     add(on('settingsChanged', (s) => setShow(s.showFlowbar)));
     add(on('transcriptAdded', () => flashDone()));
+    // The main window is normally closed, so backend notices are shown here.
+    add(
+      on('toast', (t) => {
+        clearTimeout(toastTimer.current);
+        setToast(t);
+        toastTimer.current = setTimeout(() => setToast(null), TOAST_MS);
+      }),
+    );
     api.getState().then((s) => alive && (prev.current = s.kind, setState(s))).catch(() => {});
     api.settingsGet().then((s) => alive && setShow(s.showFlowbar)).catch(() => {});
     return () => {
       alive = false;
       clearTimeout(doneTimer.current);
+      clearTimeout(toastTimer.current);
       unlisten.forEach((u) => u());
     };
   }, []);
@@ -52,6 +64,7 @@ export default function FlowBar() {
   const kind: Kind =
     state.kind === 'recording' ? 'recording'
     : state.kind === 'error' ? 'error'
+    : toast ? 'toast'
     : state.kind === 'transcribing' || state.kind === 'inserting' ? 'transcribing'
     : done ? 'done'
     : 'idle';
@@ -64,7 +77,7 @@ export default function FlowBar() {
       <div
         data-testid={kind === 'idle' ? 'flowbar-idle' : 'flowbar-pill'}
         data-kind={kind}
-        className={`fb-pill fb-${kind}`}
+        className={`fb-pill fb-${kind}${kind === 'toast' ? ` fb-toast-${toast?.level === 'error' ? 'error' : 'warning'}` : ''}`}
       >
         {kind === 'recording' && (
           <>
@@ -78,6 +91,7 @@ export default function FlowBar() {
         {kind === 'done' && (
           <span data-testid="flowbar-done" className="fb-check">✓</span>
         )}
+        {kind === 'toast' && toast && <span className="fb-toast-text">{toast.message}</span>}
         {kind === 'error' && state.kind === 'error' && (
           <span className="fb-error-text">{state.message}</span>
         )}

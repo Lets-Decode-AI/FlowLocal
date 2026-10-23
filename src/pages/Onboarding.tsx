@@ -76,6 +76,12 @@ function Permissions({ onNext }: { onNext: () => void }) {
         <PermRow title="Microphone" why="Record your voice while you hold the hotkey." status={p?.microphone ?? 'unknown'} onRequest={() => attempt(api.requestMicrophone)} onOpen={() => attempt(() => api.openPermissionSettings('microphone'))} />
         <PermRow title="Accessibility" why="Paste the transcript into the app you are using." status={p?.accessibility ?? 'unknown'} onOpen={() => attempt(() => api.openPermissionSettings('accessibility'))} />
       </div>
+      {p && p.accessibility !== 'notRequired' && (
+        <p className="muted">
+          Using the Fn / 🌐 key? macOS may show the emoji picker or start its own dictation when you press it.
+          Set System Settings → Keyboard → "Press 🌐 key to: Do Nothing".
+        </p>
+      )}
       <div className="onb-actions">
         <button className="btn btn-ghost" onClick={onNext}>Skip for now</button>
         <button className="btn btn-primary" disabled={!ready} onClick={onNext}>Continue</button>

@@ -89,6 +89,25 @@ describe('Onboarding', () => {
   });
 });
 
+describe('Onboarding Globe key note', () => {
+  it('permissions_step_explains_the_globe_key_setting_on_macos', async () => {
+    render(<Onboarding />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: /get started/i }));
+    await flush();
+    expect(screen.getByText(/Press .* key to: Do Nothing/)).toBeTruthy();
+  });
+
+  it('permissions_step_omits_the_globe_note_off_macos', async () => {
+    a.permissionsStatus.mockResolvedValue({ microphone: 'notRequired', accessibility: 'notRequired' });
+    render(<Onboarding />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: /get started/i }));
+    await flush();
+    expect(screen.queryByText(/Do Nothing/)).toBeNull();
+  });
+});
+
 describe('Onboarding paused', () => {
   it('onboarding_paused_download_offers_resume', async () => {
     render(<Onboarding />);
@@ -116,6 +135,15 @@ describe('Models', () => {
     const row = screen.getByText('Whisper Tiny').closest('[data-testid="model-row"]') as HTMLElement;
     fireEvent.click(within(row).getByRole('button', { name: /download/i }));
     expect(a.modelInstall).toHaveBeenCalledWith('m2');
+  });
+
+  it('models_list_refreshes_when_the_tray_changes_the_active_model', async () => {
+    render(<Models />);
+    await flush();
+    const before = a.installed.mock.calls.length;
+    emit('modelsChanged', null);
+    await flush();
+    expect(a.installed.mock.calls.length).toBeGreaterThan(before);
   });
 
   it('models_search_shows_incompatible_reason', async () => {
