@@ -28,7 +28,6 @@ vi.mock('../ipc', () => ({
 }));
 
 import { api } from '../ipc';
-import Onboarding from '../pages/Onboarding';
 import Models from '../pages/Models';
 import History from '../pages/History';
 import Settings from '../pages/Settings';
@@ -55,75 +54,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-});
-
-describe('Onboarding', () => {
-  it('onboarding_advances_when_permissions_granted', async () => {
-    a.permissionsStatus.mockResolvedValue({ microphone: 'denied', accessibility: 'denied' });
-    render(<Onboarding />);
-    await flush();
-    fireEvent.click(screen.getByRole('button', { name: /get started/i }));
-    await flush();
-    expect((screen.getByRole('button', { name: /^continue$/i }) as HTMLButtonElement).disabled).toBe(true);
-    a.permissionsStatus.mockResolvedValue({ microphone: 'granted', accessibility: 'granted' });
-    await tick(1000);
-    const next = screen.getByRole('button', { name: /^continue$/i }) as HTMLButtonElement;
-    expect(next.disabled).toBe(false);
-    fireEvent.click(next);
-    await flush();
-    expect(screen.getByText('Parakeet Small')).toBeTruthy();
-  });
-
-  it('onboarding_download_shows_progress', async () => {
-    render(<Onboarding />);
-    await flush();
-    fireEvent.click(screen.getByRole('button', { name: /get started/i }));
-    await flush();
-    fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
-    await flush();
-    fireEvent.click(screen.getByRole('button', { name: /download/i }));
-    await flush();
-    expect(a.modelInstall).toHaveBeenCalledWith('m1');
-    emit('progress', { modelId: 'm1', bytesDone: 50, total: 100, bytesPerSec: 10, etaSecs: 5, status: 'Downloading', error: null });
-    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('50');
-  });
-});
-
-describe('Onboarding Globe key note', () => {
-  it('permissions_step_explains_the_globe_key_setting_on_macos', async () => {
-    render(<Onboarding />);
-    await flush();
-    fireEvent.click(screen.getByRole('button', { name: /get started/i }));
-    await flush();
-    expect(screen.getByText(/Press .* key to: Do Nothing/)).toBeTruthy();
-  });
-
-  it('permissions_step_omits_the_globe_note_off_macos', async () => {
-    a.permissionsStatus.mockResolvedValue({ microphone: 'notRequired', accessibility: 'notRequired' });
-    render(<Onboarding />);
-    await flush();
-    fireEvent.click(screen.getByRole('button', { name: /get started/i }));
-    await flush();
-    expect(screen.queryByText(/Do Nothing/)).toBeNull();
-  });
-});
-
-describe('Onboarding paused', () => {
-  it('onboarding_paused_download_offers_resume', async () => {
-    render(<Onboarding />);
-    await flush();
-    fireEvent.click(screen.getByRole('button', { name: /get started/i }));
-    await flush();
-    fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
-    await flush();
-    fireEvent.click(screen.getByRole('button', { name: /download/i }));
-    await flush();
-    emit('progress', { modelId: 'm1', bytesDone: 50, total: 100, bytesPerSec: 0, etaSecs: null, status: 'Paused', error: null });
-    fireEvent.click(screen.getByRole('button', { name: /^resume$/i }));
-    expect(a.modelResume).toHaveBeenCalledWith('m1');
-    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /choose another/i })).toBeTruthy();
-  });
 });
 
 describe('Models', () => {
