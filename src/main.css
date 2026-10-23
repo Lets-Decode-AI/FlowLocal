@@ -133,7 +133,7 @@ select.input { width: auto; }
 .dict li { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-top: 1px solid var(--border); }
 .dict-empty { margin-bottom: 14px; }
 
-.onb-drag { position: fixed; top: 0; left: 0; right: 0; z-index: 0; }
+.onb-drag { position: fixed; top: 0; left: 0; right: 0; height: 52px; z-index: 2; background: transparent; }
 .onb { position: relative; z-index: 1; background: var(--window-bg); height: 100%; display: flex; align-items: center; justify-content: center; padding: 52px 24px 24px; box-sizing: border-box; overflow-y: auto; }
 .onb-card { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: 16px; }
 .onb-dots { display: flex; gap: 6px; }
