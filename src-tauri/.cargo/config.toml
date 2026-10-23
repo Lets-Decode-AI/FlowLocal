@@ -1,4 +1,6 @@
 # sherpa-rs links sherpa-onnx statically. On Linux its build script requires
-# this relocation model, otherwise the build fails.
+# this relocation model, and the prebuilt static archives only link with the
+# system linker (rust-lld, the default since Rust 1.90, leaves the sherpa-onnx
+# C API symbols undefined).
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "relocation-model=dynamic-no-pic"]
+rustflags = ["-C", "relocation-model=dynamic-no-pic", "-C", "linker-features=-lld"]
