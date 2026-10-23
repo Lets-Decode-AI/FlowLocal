@@ -32,13 +32,13 @@ pub enum HotkeyEvent {
 pub enum HotkeyError {
     /// The macOS event tap could not be created (Accessibility / Input
     /// Monitoring not granted). Retry once the permission is granted.
-    #[error("keyboard event tap unavailable (grant Accessibility permission)")]
+    #[error("The keyboard event tap is unavailable. Grant Accessibility permission.")]
     TapUnavailable,
-    #[error("global hotkeys are not supported on this platform/session")]
+    #[error("Global hotkeys are not supported in this session.")]
     Unsupported,
-    #[error("keyboard listener failed to start: {0}")]
+    #[error("The keyboard listener failed to start: {0}")]
     ListenFailed(String),
-    #[error("hotkey backend error: {0}")]
+    #[error("Hotkey error: {0}")]
     Backend(String),
 }
 

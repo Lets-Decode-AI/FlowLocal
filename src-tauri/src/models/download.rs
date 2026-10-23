@@ -35,7 +35,7 @@ pub struct Progress {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadError {
-    #[error("checksum mismatch")]
+    #[error("The file did not match its checksum")]
     Checksum,
     #[error("cancelled")]
     Cancelled,

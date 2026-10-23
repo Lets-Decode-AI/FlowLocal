@@ -140,9 +140,9 @@ impl Drop for ControllerHandle {
 
 /// Flow Bar message when the text was only copied (the reason is logged).
 #[cfg(target_os = "macos")]
-pub const COPIED_ONLY_MESSAGE: &str = "Copied \u{2014} press \u{2318}V";
+pub const COPIED_ONLY_MESSAGE: &str = "Copied. Press \u{2318}V to paste.";
 #[cfg(not(target_os = "macos"))]
-pub const COPIED_ONLY_MESSAGE: &str = "Copied \u{2014} press Ctrl+V";
+pub const COPIED_ONLY_MESSAGE: &str = "Copied. Press Ctrl+V to paste.";
 
 /// Minimum spacing of level events (~30 Hz).
 const LEVEL_EVERY: Duration = Duration::from_millis(33);

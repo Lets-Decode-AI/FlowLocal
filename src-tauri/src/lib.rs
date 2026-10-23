@@ -50,15 +50,13 @@ fn open_main_window(app: &AppHandle, route: Option<&str>) -> tauri::Result<()> {
             .hidden_title(true)
             .traffic_light_position(tauri::LogicalPosition::new(16.0, 20.0))
             .transparent(true)
-            .effects(
-                tauri::utils::config::WindowEffectsConfig {
-                    effects: vec![tauri::window::Effect::Sidebar],
-                    state: Some(tauri::window::EffectState::Active),
-                    radius: None,
-                    color: None,
-                    interactive: false,
-                },
-            );
+            .effects(tauri::utils::config::WindowEffectsConfig {
+                effects: vec![tauri::window::Effect::Sidebar],
+                state: Some(tauri::window::EffectState::Active),
+                radius: None,
+                color: None,
+                interactive: false,
+            });
     }
     if let Some(route) = route {
         // Hash route, applied before the page's own scripts run.

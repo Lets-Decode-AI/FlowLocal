@@ -580,7 +580,7 @@ async fn recorder_error_goes_to_error_then_idle() {
     wait_for("error state", || {
         h.states()
             .iter()
-            .any(|s| s["kind"] == "error" && s["message"] == "microphone permission denied")
+            .any(|s| s["kind"] == "error" && s["message"] == "Microphone access denied")
     })
     .await;
     assert!(h.inserted().is_empty());
@@ -612,7 +612,7 @@ async fn copied_only_emits_toast_and_still_persists() {
     assert_eq!(toasts.len(), 1);
     assert_eq!(toasts[0]["level"], json!("warning"));
     assert_eq!(toasts[0]["message"], json!(super::COPIED_ONLY_MESSAGE));
-    assert!(super::COPIED_ONLY_MESSAGE.starts_with("Copied \u{2014} press "));
+    assert!(super::COPIED_ONLY_MESSAGE.starts_with("Copied. Press "));
 }
 
 #[tokio::test(start_paused = true)]
@@ -665,7 +665,7 @@ async fn device_lost_mid_recording_shows_error_promptly() {
     wait_for("error state", || {
         h.states()
             .iter()
-            .any(|s| s["kind"] == "error" && s["message"] == "input device was lost")
+            .any(|s| s["kind"] == "error" && s["message"] == "The microphone was disconnected")
     })
     .await;
     wait_for("session cancelled", || {

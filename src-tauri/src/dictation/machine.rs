@@ -382,7 +382,7 @@ mod tests {
         assert_eq!(
             s,
             State::Error {
-                message: "input device was lost".into(),
+                message: "The microphone was disconnected".into(),
                 since: t
             }
         );

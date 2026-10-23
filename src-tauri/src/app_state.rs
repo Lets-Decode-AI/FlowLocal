@@ -184,10 +184,10 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 pub fn validate_settings(s: &Settings) -> Result<(), String> {
     if s.hotkey.keys.is_empty() {
-        return Err("hotkey must contain at least one key".into());
+        return Err("Choose at least one key for the shortcut.".into());
     }
     if s.hotkey.keys.contains(&crate::hotkey::Key::Escape) {
-        return Err("Esc cannot be part of the hotkey (it cancels dictation)".into());
+        return Err("Esc cannot be part of the shortcut because it cancels dictation.".into());
     }
     Ok(())
 }

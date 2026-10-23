@@ -542,7 +542,11 @@ impl Manager {
                     Ok(()) => break,
                     Err(DownloadError::Cancelled) => return None,
                     Err(DownloadError::Checksum) => {
-                        return Some((0, DlStatus::Failed("Checksum mismatch".into()), None));
+                        return Some((
+                            0,
+                            DlStatus::Failed("The download did not match its checksum".into()),
+                            None,
+                        ));
                     }
                     Err(e) if attempt >= MAX_RETRIES => {
                         let done = base_done + self.file_done(&entry, f);
