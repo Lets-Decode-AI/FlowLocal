@@ -66,9 +66,13 @@ pub fn open_settings(kind: PermKind) -> Result<(), String> {
         }
         std::process::Command::new("open")
             .arg(settings_url(kind))
-            .spawn()
-            .map(|_| ())
+            .status() // waits for `open` to exit (it returns at once), so no zombie is left
             .map_err(|e| e.to_string())
+            .and_then(|s| {
+                s.success()
+                    .then_some(())
+                    .ok_or_else(|| format!("`open` failed: {s}"))
+            })
     }
     #[cfg(not(target_os = "macos"))]
     {

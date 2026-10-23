@@ -48,7 +48,7 @@ MODELS = [
          min_ram_gb=2, notes="Chinese, English, Japanese, Korean, Cantonese."),
     dict(id="whisper-turbo", name="Whisper large-v3-turbo (int8)", repo="sherpa-onnx-whisper-turbo",
          engine="whisper", files=whisper("turbo"), languages=WHISPER_TURBO_LANGS, min_ram_gb=6,
-         notes="99 languages (list shows the most common). Large download."),
+         notes="35 languages (a subset of Whisper's 99). Large download."),
 ]
 
 
