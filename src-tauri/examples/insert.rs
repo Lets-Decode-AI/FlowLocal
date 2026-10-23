@@ -9,6 +9,6 @@ fn main() {
     println!("focus a text field; inserting in 3 s...");
     std::thread::sleep(std::time::Duration::from_secs(3));
     println!("frontmost app: {:?}", frontmost_app_name());
-    let outcome = ClipboardInserter::system().insert(&text);
+    let outcome = ClipboardInserter::system(std::sync::Arc::new(|job| job())).insert(&text);
     println!("outcome: {outcome:?}");
 }

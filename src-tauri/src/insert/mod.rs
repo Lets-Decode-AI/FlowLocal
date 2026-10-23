@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 use crate::postprocess::InsertContext;
 use clipboard::{Clipboard, ClipboardSnapshot, SystemClipboard};
-use keystroke::{EnigoKeystroke, Keystroke};
+pub use keystroke::Runner;
+use keystroke::{EnigoKeystroke, Keystroke, MainThreadKeystroke};
 
 pub use frontmost::{detect_wayland, frontmost_app_name, is_wayland, secure_input_active};
 
@@ -105,9 +106,13 @@ impl<C: Clipboard, K: Keystroke> ClipboardInserter<C, K> {
     }
 }
 
-impl ClipboardInserter<SystemClipboard, EnigoKeystroke> {
-    pub fn system() -> Self {
-        Self::new(SystemClipboard::new(), EnigoKeystroke)
+impl ClipboardInserter<SystemClipboard, MainThreadKeystroke<EnigoKeystroke>> {
+    /// `main_thread` runs the synthetic keystroke on the app's main thread.
+    pub fn system(main_thread: Runner) -> Self {
+        Self::new(
+            SystemClipboard::new(),
+            MainThreadKeystroke::new(EnigoKeystroke, main_thread),
+        )
     }
 }
 
@@ -322,7 +327,8 @@ mod tests {
     #[test]
     fn system_inserter_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<ClipboardInserter<SystemClipboard, EnigoKeystroke>>();
+        assert_send_sync::<ClipboardInserter<SystemClipboard, MainThreadKeystroke<EnigoKeystroke>>>(
+        );
     }
 
     #[test]
