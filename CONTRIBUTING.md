@@ -49,6 +49,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 cd ..
 npx tsc --noEmit
+npx tsc -p tsconfig.test.json --noEmit
 npx vitest run
 ```
 

@@ -204,7 +204,7 @@ pub fn commit_settings(
     let old = lock(current).clone();
     if new.launch_at_login != old.launch_at_login {
         auto.set(new.launch_at_login)
-            .map_err(|e| format!("could not change launch at login: {e}"))?;
+            .map_err(|e| format!("Could not change the open at login setting. Details: {e}"))?;
     }
     if let Err(e) = store.set_setting(SETTINGS_KEY, &new) {
         if new.launch_at_login != old.launch_at_login {

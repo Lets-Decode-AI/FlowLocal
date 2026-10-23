@@ -98,14 +98,14 @@ export default function FlowBar() {
         )}
         {kind === 'toast' && toast && (
           <>
-            <span className={`fb-icon fb-icon-${toast.level === 'error' ? 'error' : 'warning'}`}><Icon name="warning" size={16} /></span>
-            <span className="fb-toast-text">{toast.message}</span>
+            <span className={`fb-icon fb-icon-${toast.level === 'error' ? 'error' : 'warning'}`}><Icon name={toast.level === 'error' ? 'error' : 'warning'} size={16} /></span>
+            <span className="fb-clamp">{toast.message}</span>
           </>
         )}
         {kind === 'error' && state.kind === 'error' && (
           <>
-            <span className="fb-icon fb-icon-error"><Icon name="warning" size={16} /></span>
-            <span className="fb-error-text">{state.message}</span>
+            <span className="fb-icon fb-icon-error"><Icon name="error" size={16} /></span>
+            <span className="fb-clamp">{state.message}</span>
           </>
         )}
       </div>

@@ -59,7 +59,7 @@ jobs:
         run: cargo test
 
       - name: tsc
-        run: npx tsc --noEmit
+        run: npx tsc --noEmit && npx tsc -p tsconfig.test.json --noEmit
 
       - name: vitest
         run: npx vitest run

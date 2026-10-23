@@ -21,7 +21,7 @@ models from Hugging Face inside the app.
 
 - Push-to-talk and hands-free dictation into any focused text field. Double-press the shortcut for hands-free, and press `Esc` to cancel.
 - Speech-to-text with sherpa-onnx. Transcription does not use the network.
-- In-app model manager with a curated library, Hugging Face search, resumable downloads, SHA-256 verification, pause, resume, cancel and disk usage per model.
+- In-app model manager with a list of recommended models, Hugging Face search, resumable downloads, SHA-256 verification, pause, resume, cancel and disk usage per model.
 - A model that suits your hardware is recommended on first run.
 - Streaming chunked transcription, so long dictations finish soon after you let go of the key.
 - Flow Bar: a small pill on top of other windows that shows when FlowLocal is listening, transcribing or done, and shows errors. It never takes focus.
@@ -78,7 +78,7 @@ FlowLocal needs two permissions. Setup walks you through them (System Settings >
 
 - **Microphone**: records your voice.
 - **Accessibility**: lets FlowLocal read the global shortcut (the `Fn` key is read through an event tap) and send the paste keystroke.
-  Until you grant it, FlowLocal shows "Grant Accessibility to enable the hotkey". The shortcut starts working as soon as
+  Until you grant it, FlowLocal shows the message "Grant Accessibility access to turn on the shortcut." The shortcut starts working as soon as
   you grant it. You do not need to relaunch.
 
 If you use the `Fn` or Globe key as the shortcut, set System Settings > Keyboard > "Press 🌐 key to" to **Do Nothing**.
@@ -92,14 +92,14 @@ Run the installer. For unsigned builds, Windows SmartScreen may warn about an un
 ### Linux
 
 - **X11**: supported. The default shortcut is to hold `Ctrl+Super`.
-- **Wayland**: the global shortcut is not available yet, and the app shows "Global hotkey unavailable on Wayland".
+- **Wayland**: the global shortcut is not available yet, and the app shows "The global shortcut is not available on Wayland."
   Use an X11 session for now. Where synthetic paste is blocked, the text stays on the clipboard and you paste it yourself.
   Support through the XDG GlobalShortcuts portal is on the [Roadmap](#roadmap).
 - Make the AppImage executable (`chmod +x FlowLocal_*.AppImage`) or install the `.deb` with `sudo apt install ./FlowLocal_*.deb`.
 
 ## Supported models
 
-The library is bundled in the app ([`src-tauri/resources/catalog.json`](src-tauri/resources/catalog.json)),
+The model list is bundled in the app ([`src-tauri/resources/catalog.json`](src-tauri/resources/catalog.json)),
 with sizes and SHA-256 hashes pinned to specific Hugging Face revisions. You can also search Hugging Face
 from the app for other sherpa-onnx repos. FlowLocal detects compatible transducer, Whisper, Moonshine and SenseVoice layouts.
 
@@ -203,7 +203,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 
 # Frontend
-cd .. && npx tsc --noEmit && npx vitest run
+cd .. && npx tsc --noEmit && npx tsc -p tsconfig.test.json --noEmit && npx vitest run
 ```
 
 The real-model integration tests (word error rate on fixtures, streaming latency) are `#[ignore]`d because they need a

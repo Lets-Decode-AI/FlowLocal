@@ -35,15 +35,15 @@ pub struct Progress {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadError {
-    #[error("The file did not match its checksum")]
+    #[error("The downloaded file did not match its checksum.")]
     Checksum,
-    #[error("cancelled")]
+    #[error("The download was cancelled.")]
     Cancelled,
-    #[error("http status {0}")]
+    #[error("The server returned an error (HTTP {0}).")]
     Http(u16),
-    #[error("network: {0}")]
+    #[error("A network error stopped the download. Details: {0}")]
     Network(#[from] reqwest::Error),
-    #[error("io: {0}")]
+    #[error("The file could not be saved to disk. Details: {0}")]
     Io(#[from] std::io::Error),
 }
 

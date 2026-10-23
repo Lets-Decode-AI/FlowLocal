@@ -5,6 +5,7 @@ import Group from '../components/ui/Group';
 import Segmented from '../components/ui/Segmented';
 import Switch from '../components/ui/Switch';
 import { keycapsFor } from '../components/ui/Keycap';
+import Menu from '../components/ui/Menu';
 
 afterEach(cleanup);
 
@@ -58,5 +59,28 @@ describe('ui primitives', () => {
     expect(screen.getByText('Show Flow Bar')).toBeTruthy();
     expect(screen.getByText('Floating pill while dictating')).toBeTruthy();
     expect(screen.getByText('acc')).toBeTruthy();
+  });
+
+  it('menu_closes_on_escape_and_outside_click_and_returns_focus', () => {
+    const onSelect = vi.fn();
+    render(<div><Menu label="Options" items={[{ label: 'Use', onSelect }, { label: 'Delete', onSelect: () => {}, destructive: true }]} /><button>Elsewhere</button></div>);
+    const trigger = screen.getByRole('button', { name: 'Options' });
+    fireEvent.click(trigger);
+    expect(screen.getAllByRole('menuitem')).toHaveLength(2);
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Use' }), { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Delete' }));
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    fireEvent.click(trigger);
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Elsewhere' }));
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Use' }), { key: 'Tab' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Use' }));
+    expect(onSelect).toHaveBeenCalled();
+    expect(document.activeElement).toBe(trigger);
   });
 });

@@ -101,7 +101,7 @@ export default function Models() {
                 <ModelRow key={m.id} id={m.id} name={m.name} meta={meta(m, fmtBytes(m.diskBytes))} installed active={m.active} progress={progress[m.id]} {...actions(m.id)} />
               ))}
               {inFlight.map((p) => (
-                <ModelRow key={p.modelId} id={p.modelId} name={nameOf(p.modelId)} meta={typeof p.status === 'object' ? 'Download failed' : 'Downloading'} installed={false} active={false} progress={p} {...actions(p.modelId)} />
+                <ModelRow key={p.modelId} id={p.modelId} name={nameOf(p.modelId)} meta={typeof p.status === 'object' ? 'Not installed' : 'Downloading'} installed={false} active={false} progress={p} {...actions(p.modelId)} />
               ))}
             </Group>
           )}

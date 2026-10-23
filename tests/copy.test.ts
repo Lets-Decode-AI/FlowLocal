@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const root = join(import.meta.dirname, '..', '..');
+const root = join(import.meta.dirname, '..');
 const EM = String.fromCharCode(0x2014);
 const EN = String.fromCharCode(0x2013);
 // Escaped forms in TS and Rust source, plus HTML entities.

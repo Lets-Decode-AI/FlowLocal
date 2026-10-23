@@ -715,7 +715,7 @@ impl Controller {
             .await
             .map_err(|e| {
                 tracing::error!("insert task failed: {e}");
-                "Inserting the text failed unexpectedly".to_string()
+                "Inserting the text failed unexpectedly.".to_string()
             });
             let _ = tx.send(Msg::InsertDone(done));
         });
@@ -752,7 +752,7 @@ impl Controller {
             Ok(id) => (self.d.emit)(events::TRANSCRIPT_ADDED, json!({ "id": id })),
             Err(e) => {
                 tracing::error!("saving transcript failed: {e:#}");
-                self.toast("error", "Could not save to history");
+                self.toast("error", "Could not save the dictation to history.");
             }
         }
     }

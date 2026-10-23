@@ -86,15 +86,15 @@ describe('FlowBar', () => {
   it('shows_toast_message_in_the_pill_for_about_three_seconds', async () => {
     await mount();
     vi.useFakeTimers();
-    emit('toast', { level: 'warning', message: 'Grant Accessibility to enable the hotkey' });
-    expect(screen.getByText('Grant Accessibility to enable the hotkey')).toBeTruthy();
+    emit('toast', { level: 'warning', message: 'Grant Accessibility access to turn on the shortcut.' });
+    expect(screen.getByText('Grant Accessibility access to turn on the shortcut.')).toBeTruthy();
     const pill = screen.getByTestId('flowbar-pill');
     expect(pill.getAttribute('data-kind')).toBe('toast');
     expect(pill.className).toContain('fb-toast-warning');
     act(() => void vi.advanceTimersByTime(2900));
-    expect(screen.queryByText('Grant Accessibility to enable the hotkey')).toBeTruthy();
+    expect(screen.queryByText('Grant Accessibility access to turn on the shortcut.')).toBeTruthy();
     act(() => void vi.advanceTimersByTime(200));
-    expect(screen.queryByText('Grant Accessibility to enable the hotkey')).toBeNull();
+    expect(screen.queryByText('Grant Accessibility access to turn on the shortcut.')).toBeNull();
     expect(screen.getByTestId('flowbar-idle')).toBeTruthy();
   });
 
@@ -121,6 +121,14 @@ describe('FlowBar', () => {
     await mount();
     setState({ kind: 'transcribing' });
     expect(screen.getAllByTestId('transcribing-dot')).toHaveLength(3);
+  });
+
+  it('error_text_wraps_to_two_lines_instead_of_truncating', async () => {
+    await mount();
+    setState({ kind: 'error', message: 'The microphone was disconnected.' });
+    const text = screen.getByText('The microphone was disconnected.');
+    expect(text.className).toContain('fb-clamp');
+    expect(screen.getByTestId('flowbar-pill').querySelector('svg')).toBeTruthy();
   });
 
   it('toast_pill_has_an_icon_for_warnings_and_errors', async () => {

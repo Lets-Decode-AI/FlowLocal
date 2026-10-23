@@ -506,9 +506,10 @@ async fn no_model_shows_error() {
     let h = harness(voiced(1.0), false);
     h.send(HotkeyEvent::Pressed);
     wait_for("error state", || {
-        h.states()
-            .iter()
-            .any(|s| s["kind"] == "error" && s["message"] == "No model installed")
+        h.states().iter().any(|s| {
+            s["kind"] == "error"
+                && s["message"] == "No speech model is installed. Download one in Models."
+        })
     })
     .await;
     assert_eq!(h.rec.starts.load(Ordering::SeqCst), 0);
@@ -580,7 +581,7 @@ async fn recorder_error_goes_to_error_then_idle() {
     wait_for("error state", || {
         h.states()
             .iter()
-            .any(|s| s["kind"] == "error" && s["message"] == "Microphone access denied")
+            .any(|s| s["kind"] == "error" && s["message"] == "Microphone access is turned off.")
     })
     .await;
     assert!(h.inserted().is_empty());
@@ -665,7 +666,7 @@ async fn device_lost_mid_recording_shows_error_promptly() {
     wait_for("error state", || {
         h.states()
             .iter()
-            .any(|s| s["kind"] == "error" && s["message"] == "The microphone was disconnected")
+            .any(|s| s["kind"] == "error" && s["message"] == "The microphone was disconnected.")
     })
     .await;
     wait_for("session cancelled", || {
@@ -794,7 +795,7 @@ async fn denied_microphone_is_reported_not_silently_discarded() {
     wait_for("error state", || {
         h.states()
             .iter()
-            .any(|s| s["kind"] == "error" && s["message"] == "Microphone access denied")
+            .any(|s| s["kind"] == "error" && s["message"] == "Microphone access is turned off.")
     })
     .await;
     assert_eq!(h.rec.starts.load(Ordering::SeqCst), 0);
@@ -809,7 +810,10 @@ async fn denied_microphone_is_reported_not_silently_discarded() {
         .map(|(_, v)| v.clone())
         .collect();
     assert_eq!(toasts.len(), 1);
-    assert_eq!(toasts[0]["message"], json!("Microphone access denied"));
+    assert_eq!(
+        toasts[0]["message"],
+        json!("Microphone access is turned off.")
+    );
     assert_eq!(toasts[0]["level"], json!("error"));
 }
 

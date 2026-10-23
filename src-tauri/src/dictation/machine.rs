@@ -19,7 +19,7 @@ pub const HANDS_FREE_MAX: Duration = Duration::from_secs(6 * 60);
 pub const ERROR_SHOWN_FOR: Duration = Duration::from_secs(2);
 
 /// Shown (state + toast) when the OS denies microphone access.
-pub const MIC_DENIED: &str = "Microphone access denied";
+pub const MIC_DENIED: &str = "Microphone access is turned off.";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum State {
@@ -186,10 +186,20 @@ pub fn step(state: State, input: Input, now: Instant) -> (State, Vec<Effect>) {
         (_, Input::RecorderFailed(e)) => finish(&old, error(e.to_string(), now), vec![]),
         (State::Recording { .. }, Input::NoModel) => finish(
             &old,
-            error("No model installed".into(), now),
+            error(
+                "No speech model is installed. Download one in Models.".into(),
+                now,
+            ),
             vec![Effect::CancelRecording, Effect::ArmEsc(false)],
         ),
-        (_, Input::NoModel) => finish(&old, error("No model installed".into(), now), vec![]),
+        (_, Input::NoModel) => finish(
+            &old,
+            error(
+                "No speech model is installed. Download one in Models.".into(),
+                now,
+            ),
+            vec![],
+        ),
 
         (State::Recording { .. }, Input::MicDenied) => finish(
             &old,
@@ -346,7 +356,7 @@ mod tests {
         assert_eq!(
             s,
             State::Error {
-                message: "No model installed".into(),
+                message: "No speech model is installed. Download one in Models.".into(),
                 since: t
             }
         );
@@ -364,7 +374,7 @@ mod tests {
         assert_eq!(
             s,
             State::Error {
-                message: "Microphone access denied".into(),
+                message: "Microphone access is turned off.".into(),
                 since: t
             }
         );
@@ -382,7 +392,7 @@ mod tests {
         assert_eq!(
             s,
             State::Error {
-                message: "The microphone was disconnected".into(),
+                message: "The microphone was disconnected.".into(),
                 since: t
             }
         );

@@ -32,11 +32,11 @@ const POLL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum RecorderError {
-    #[error("No microphone found")]
+    #[error("No microphone found.")]
     NoDevice,
-    #[error("Microphone access denied")]
+    #[error("Microphone access is turned off.")]
     PermissionDenied,
-    #[error("The microphone was disconnected")]
+    #[error("The microphone was disconnected.")]
     DeviceLost,
     #[error("{0}")]
     Other(String),
