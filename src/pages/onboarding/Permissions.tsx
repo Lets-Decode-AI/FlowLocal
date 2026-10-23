@@ -11,7 +11,8 @@ import { StepFrame, type StepProps } from './Shell';
 
 const ok = (p: Perm) => p === 'granted' || p === 'notRequired';
 
-function Accessory({ status, name, onAllow }: { status: Perm; name: string; onAllow: () => void }) {
+function Accessory({ status, name, onAllow }: { status: Perm | null; name: string; onAllow: () => void }) {
+  if (status === null) return <span aria-label={`Checking ${name}`}>Checking</span>;
   if (status === 'notRequired') return <span>Not required</span>;
   if (status === 'granted') {
     return <span className="onb-allowed"><Icon name="check" size={14} />Allowed</span>;
@@ -30,17 +31,21 @@ export default function Permissions({ onNext, onBack }: StepProps) {
     return () => { live = false; clearInterval(t); };
   }, []);
   const attempt = (f: () => Promise<void>) => f().catch((e) => toast(errMsg(e), 'error'));
-  const mic = p?.microphone ?? 'unknown';
-  const acc = p?.accessibility ?? 'unknown';
-  const where = currentPlatform() === 'mac' ? 'System Settings' : 'your system settings';
+  const mic = p?.microphone ?? null;
+  const acc = p?.accessibility ?? null;
+  const mac = currentPlatform() === 'mac';
+  const pending = !!p && !(ok(p.microphone) && ok(p.accessibility));
+  const where = mac ? 'System Settings' : 'your system settings';
   return (
-    <StepFrame onBack={onBack} onNext={onNext} nextDisabled={!(ok(mic) && ok(acc))} note={`You can change these later in ${where}.`}>
+    <StepFrame onBack={onBack} onNext={onNext} nextDisabled={!(p && ok(p.microphone) && ok(p.accessibility))}
+      extra={mac && pending ? <Button variant="plain" size="large" onClick={onNext}>Continue without</Button> : undefined}
+      note={`You can change these later in ${where}.`}>
       <h1>Permissions</h1>
       <p className="muted">FlowLocal needs two permissions to hear you and type for you.</p>
       <Group>
         <Row
           icon="mic" label="Microphone" detail="Record your voice while you hold the shortcut."
-          accessory={<Accessory status={mic} name="Microphone" onAllow={() => attempt(() => (mic === 'denied' ? api.openPermissionSettings('microphone') : api.requestMicrophone()))} />}
+          accessory={<Accessory status={mic} name="Microphone" onAllow={() => attempt(() => (p?.microphone === 'denied' ? api.openPermissionSettings('microphone') : api.requestMicrophone()))} />}
         />
         <Row
           icon="keyboard" label="Accessibility" detail="Insert the text into the app you are using."

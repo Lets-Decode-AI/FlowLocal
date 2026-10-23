@@ -152,6 +152,26 @@ describe('Permissions step', () => {
     expect(screen.getByText('Parakeet Small')).toBeTruthy();
   });
 
+  it('continue_without_permissions_is_available_on_mac', async () => {
+    a.permissionsStatus.mockResolvedValue({ microphone: 'granted', accessibility: 'denied' });
+    render(<Onboarding />);
+    await flush();
+    await toStep(3);
+    expect((screen.getByRole('button', { name: /^continue$/i }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: /continue without/i }));
+    await flush();
+    expect(stepLabel()).toMatch(/Step 4 of 5/);
+  });
+
+  it('no_allow_button_flashes_before_the_first_poll', async () => {
+    a.permissionsStatus.mockReturnValue(new Promise(() => {}));
+    render(<Onboarding />);
+    await flush();
+    await toStep(3);
+    expect(screen.queryByRole('button', { name: /allow/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /continue without/i })).toBeNull();
+  });
+
   it('allow_buttons_request_or_open_settings', async () => {
     a.permissionsStatus.mockResolvedValue({ microphone: 'unknown', accessibility: 'denied' });
     render(<Onboarding />);
@@ -205,6 +225,21 @@ describe('Model step', () => {
     expect(screen.getByRole('button', { name: /choose a different model/i })).toBeTruthy();
   });
 
+  it('download_progress_survives_back_and_forward', async () => {
+    render(<Onboarding />);
+    await flush();
+    await toStep(4);
+    fireEvent.click(screen.getByRole('button', { name: /^download$/i }));
+    await flush();
+    emit('progress', { modelId: 'm1', bytesDone: 50, total: 100, bytesPerSec: 1, etaSecs: 5, status: 'Downloading', error: null });
+    fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
+    await flush();
+    emit('progress', { modelId: 'm1', bytesDone: 60, total: 100, bytesPerSec: 1, etaSecs: 4, status: 'Downloading', error: null });
+    await next();
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('60');
+    expect(screen.queryByRole('button', { name: /^download$/i })).toBeNull();
+  });
+
   it('failed_download_offers_retry', async () => {
     render(<Onboarding />);
     await flush();
@@ -253,6 +288,16 @@ describe('Try it step', () => {
     expect(screen.getByText(/and say something/)).toBeTruthy();
     emit('state', { kind: 'recording', handsFree: false });
     expect(screen.getByRole('status').textContent).toMatch(/Listening/);
+  });
+
+  it('try_it_reads_current_state_and_does_not_light_up_for_errors', async () => {
+    a.getState.mockResolvedValueOnce({ kind: 'recording', handsFree: false });
+    await toTryIt();
+    expect(screen.getByRole('status').textContent).toMatch(/Listening/);
+    emit('state', { kind: 'error', message: 'cpal: device lost 0x5' });
+    const st = screen.getByRole('status');
+    expect(st.textContent).not.toMatch(/cpal/);
+    expect(st.className).not.toMatch(/listening-on/);
   });
 
   it('try_it_shows_transcript_and_finish', async () => {

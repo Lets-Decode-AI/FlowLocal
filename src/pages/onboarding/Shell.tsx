@@ -17,13 +17,15 @@ export function Dots({ step }: { step: number }) {
 }
 
 /** Body (centered 440px column) plus the Back / Continue footer shared by every step. */
-export function StepFrame({ onBack, onNext, nextDisabled, nextLabel = 'Continue', hideNext, note, children }: {
+export function StepFrame({ onBack, onNext, nextDisabled, nextLabel = 'Continue', hideNext, note, extra, children }: {
   onBack?: () => void;
   onNext?: () => void;
   nextDisabled?: boolean;
   nextLabel?: string;
   hideNext?: boolean;
   note?: ReactNode;
+  /** Quiet secondary action shown before the primary button. */
+  extra?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -33,7 +35,10 @@ export function StepFrame({ onBack, onNext, nextDisabled, nextLabel = 'Continue'
         {note && <p className="onb-note">{note}</p>}
         <div className="onb-actions">
           {onBack ? <Button variant="plain" size="large" onClick={onBack}>Back</Button> : <span />}
-          {!hideNext && <Button variant="primary" size="large" disabled={nextDisabled} onClick={onNext}>{nextLabel}</Button>}
+          <span className="onb-actions-end">
+            {extra}
+            {!hideNext && <Button variant="primary" size="large" disabled={nextDisabled} onClick={onNext}>{nextLabel}</Button>}
+          </span>
         </div>
       </footer>
     </>

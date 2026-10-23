@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, type CatalogEntry, type DownloadProgress, type Hardware } from '../../ipc';
+import { api, type CatalogEntry, type Hardware } from '../../ipc';
 import ProgressBar from '../../components/ProgressBar';
 import { useToast } from '../../components/Toasts';
 import Button from '../../components/ui/Button';
@@ -9,6 +9,7 @@ import Row from '../../components/ui/Row';
 import { errMsg, fmtBytes } from '../../lib/format';
 import { useEvent } from '../../lib/hooks';
 import { StepFrame, type StepProps } from './Shell';
+import type { Downloads } from './useDownloads';
 
 const sizeOf = (e: CatalogEntry) => fmtBytes(e.files.reduce((n, f) => n + f.size, 0));
 
@@ -35,13 +36,12 @@ function timeLeft(secs: number | null): string {
   return ` · about ${Math.round(secs / 60)} min left`;
 }
 
-export default function Model({ onNext, onBack }: StepProps) {
+export default function Model({ onNext, onBack, downloads }: StepProps & { downloads: Downloads }) {
   const toast = useToast();
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [chosen, setChosen] = useState<string | null>(null);
   const [recommended, setRecommended] = useState<{ id: string; hardware?: Partial<Hardware> } | null>(null);
   const [installedIds, setInstalledIds] = useState<string[]>([]);
-  const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [picking, setPicking] = useState(false);
   const chosenRef = useRef<string | null>(null);
   chosenRef.current = chosen;
@@ -50,23 +50,24 @@ export default function Model({ onNext, onBack }: StepProps) {
     Promise.all([api.catalog(), api.recommend(), api.installed()]).then(
       ([c, r, i]) => {
         setCatalog(c);
-        setChosen(r.id);
+        setChosen(downloads.activeId ?? r.id);
         setRecommended({ id: r.id, hardware: r.hardware });
         setInstalledIds(i.map((m) => m.id));
       },
       (e) => toast(errMsg(e), 'error'),
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast]);
 
   useEvent('progress', (p) => {
     if (p.modelId !== chosenRef.current) return;
-    setProgress(p);
     if (p.status === 'Installed') {
       setInstalledIds((x) => (x.includes(p.modelId) ? x : [...x, p.modelId]));
       api.modelSetActive(p.modelId).catch((e) => toast(errMsg(e), 'error'));
     }
   });
 
+  const progress = chosen ? downloads.byId[chosen] ?? null : null;
   const entry = catalog.find((c) => c.id === chosen);
   const isInstalled = !!chosen && installedIds.includes(chosen);
   const st = progress?.status;
@@ -85,14 +86,13 @@ export default function Model({ onNext, onBack }: StepProps) {
   };
   const download = () => {
     if (!chosen) return;
-    setProgress(null);
+    if (chosen) downloads.clear(chosen);
     run(() => api.modelInstall(chosen));
   };
   // The recommended model may already be installed without being active.
   const proceed = () => chosen && run(() => api.modelSetActive(chosen), onNext);
   const choose = (id: string) => {
     setChosen(id);
-    setProgress(null);
     setPicking(false);
   };
 
@@ -129,7 +129,7 @@ export default function Model({ onNext, onBack }: StepProps) {
                       {paused
                         ? <Button variant="primary" onClick={() => chosen && run(() => api.modelResume(chosen))}>Resume</Button>
                         : st !== 'Verifying' && <Button onClick={() => chosen && run(() => api.modelPause(chosen))}>Pause</Button>}
-                      {st !== 'Verifying' && <Button variant="plain" onClick={() => chosen && run(() => api.modelCancel(chosen), () => setProgress(null))}>Cancel</Button>}
+                      {st !== 'Verifying' && <Button variant="plain" onClick={() => chosen && run(() => api.modelCancel(chosen), () => downloads.clear(chosen))}>Cancel</Button>}
                     </span>
                   </div>
                 </>

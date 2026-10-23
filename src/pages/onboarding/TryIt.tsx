@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, type DictationState, type Transcript } from '../../ipc';
 import { useToast } from '../../components/Toasts';
 import Button from '../../components/ui/Button';
@@ -14,7 +14,7 @@ function describe(s: DictationState): string {
     case 'recording': return s.handsFree ? 'Listening, hands-free' : 'Listening';
     case 'transcribing': return 'Transcribing';
     case 'inserting': return 'Inserting';
-    case 'error': return s.message;
+    case 'error': return 'Something went wrong. Try again.';
     default: return 'Ready';
   }
 }
@@ -27,6 +27,11 @@ export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const finished = useRef(false);
 
+  useEffect(() => {
+    let live = true;
+    api.getState().then((s) => live && setState((cur) => (cur.kind === 'idle' ? s : cur)), () => {});
+    return () => { live = false; };
+  }, []);
   useEvent('state', setState);
   useEvent('transcriptAdded', async ({ id }) => {
     if (finished.current) return;
@@ -61,7 +66,7 @@ export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
       </StepFrame>
     );
   }
-  const active = state.kind !== 'idle';
+  const active = state.kind === 'recording' || state.kind === 'transcribing';
   return (
     <StepFrame onBack={onBack} hideNext>
       <h1>Try it</h1>
