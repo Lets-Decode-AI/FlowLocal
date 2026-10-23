@@ -2,3 +2,8 @@
 # this relocation model when static linking is enabled.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "relocation-model=dynamic-no-pic"]
+
+# The prebuilt sherpa-onnx static libraries for Windows use the static C
+# runtime (/MT). Match it so the app does not mix C runtimes.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
