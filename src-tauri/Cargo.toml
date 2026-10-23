@@ -39,7 +39,6 @@ thiserror = "2.0.21"
 anyhow = "1.0.104"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-sherpa-rs = { version = "0.6", default-features = false, features = ["download-binaries", "static"] }
 arboard = { version = "3.7.0", features = ["image-data"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 tokio = { version = "1.54.1", features = ["full"] }
@@ -60,6 +59,12 @@ opt-level = 3
 panic = "unwind"
 strip = true
 
+# sherpa-onnx is linked statically everywhere. macOS and Windows use the
+# prebuilt static archives; the Linux static release archive ships no
+# libraries, so on Linux sherpa-onnx is built from source with CMake.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+sherpa-rs = { version = "0.6", default-features = false, features = ["download-binaries", "static"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
 core-foundation = "0.10.1"
@@ -73,6 +78,7 @@ objc2-foundation = "0.3.2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+sherpa-rs = { version = "0.6", default-features = false, features = ["static"] }
 x11 = { version = "2.21", features = ["xlib"] }
 
 [dev-dependencies]
