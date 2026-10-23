@@ -91,7 +91,7 @@ pub trait ModelSource: Send + Sync {
 
 impl ModelSource for Manager {
     fn active(&self) -> Option<InstalledModel> {
-        Manager::active(self)
+        Manager::ensure_active(self)
     }
 }
 

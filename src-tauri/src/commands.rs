@@ -222,7 +222,7 @@ pub fn catalog() -> Vec<CatalogEntry> {
 
 #[tauri::command(async)]
 pub fn installed(st: State<'_, AppState>) -> Vec<InstalledModelDto> {
-    let active = st.models.active().map(|m| m.entry.id);
+    let active = st.models.ensure_active().map(|m| m.entry.id);
     st.models
         .installed()
         .into_iter()
@@ -264,6 +264,7 @@ pub fn model_install(
             .ok_or_else(|| format!("unknown model {id}"))?,
         (None, None) => return Err("model_install needs an id or an entry".into()),
     };
+    crate::models::validate_entry(&entry).map_err(err)?;
     st.models.install(entry);
     Ok(())
 }

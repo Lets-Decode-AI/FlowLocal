@@ -79,6 +79,40 @@ fn dir_name(id: &str) -> String {
     id.replace(['/', ':', '\\'], "__")
 }
 
+/// Model ids become directory names under the models root, so they are untrusted input:
+/// non-empty, a strict charset, and a directory name that is neither a separator-bearing
+/// path nor made only of dots (`.`, `..`).
+pub fn validate_id(id: &str) -> Result<()> {
+    let charset_ok = id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '-'));
+    let dir = dir_name(id);
+    if id.is_empty()
+        || id.len() > 200
+        || !charset_ok
+        || dir.chars().all(|c| c == '.')
+        || dir.contains(['/', '\\'])
+    {
+        return Err(anyhow!("invalid model id {id:?}"));
+    }
+    Ok(())
+}
+
+/// Id plus every file path of an entry; run before anything touches the disk.
+pub fn validate_entry(entry: &CatalogEntry) -> Result<()> {
+    validate_id(&entry.id)?;
+    for f in &entry.files {
+        let ok = !f.path.is_empty()
+            && Path::new(&f.path)
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)));
+        if !ok {
+            return Err(anyhow!("Invalid file path: {}", f.path));
+        }
+    }
+    Ok(())
+}
+
 fn status_str(s: &DlStatus) -> &'static str {
     match s {
         DlStatus::Queued => "queued",
@@ -146,6 +180,11 @@ impl Manager {
 
     /// Start (or restart) downloading `entry`; returns immediately.
     pub fn install(&self, entry: CatalogEntry) {
+        if let Err(e) = validate_entry(&entry) {
+            // Nothing has been created on disk; surface the problem as a failed download.
+            self.report(&entry.id, 0, 0, DlStatus::Failed(e.to_string()), None, 0.0);
+            return;
+        }
         let id = entry.id.clone();
         // Hold the lock across check, spawn and insert so concurrent installs
         // cannot both spawn and a fast-finishing task cannot beat the insert.
@@ -179,6 +218,9 @@ impl Manager {
     }
 
     pub fn resume(&self, id: &str) {
+        if validate_id(id).is_err() {
+            return;
+        }
         let dir = self.model_dir(id);
         let entry = Self::read_entry(&dir.join(PENDING)).or_else(|| self.catalog.get(id).cloned());
         if let Some(e) = entry {
@@ -195,6 +237,9 @@ impl Manager {
     }
 
     pub async fn pause(&self, id: &str) {
+        if validate_id(id).is_err() {
+            return;
+        }
         self.stop(id).await;
         let dir = self.model_dir(id);
         let Some(entry) = Self::read_entry(&dir.join(PENDING)) else {
@@ -206,6 +251,9 @@ impl Manager {
 
     /// Stop and delete partial files and download state.
     pub async fn cancel(&self, id: &str) {
+        if validate_id(id).is_err() {
+            return;
+        }
         self.stop(id).await;
         let dir = self.model_dir(id);
         if !dir.join(MANIFEST).exists() {
@@ -215,13 +263,16 @@ impl Manager {
 
     /// Remove an installed (or partial) model and free its disk space.
     pub async fn delete(&self, id: &str) -> Result<()> {
+        validate_id(id)?;
         self.stop(id).await;
         let dir = self.model_dir(id);
         if dir.exists() {
             std::fs::remove_dir_all(&dir)?;
         }
         if self.store.get_setting::<String>(ACTIVE_KEY)?.as_deref() == Some(id) {
-            self.store.set_setting(ACTIVE_KEY, &String::new())?;
+            self.store.delete_setting(ACTIVE_KEY)?;
+            // Fall back to another installed model, if any.
+            self.ensure_active();
         }
         Ok(())
     }
@@ -250,7 +301,27 @@ impl Manager {
         self.installed().into_iter().find(|m| m.entry.id == id)
     }
 
+    /// The active model, activating the first installed one when the setting is missing, empty or
+    /// points at a model that is no longer installed. `None` only when nothing is installed.
+    pub fn ensure_active(&self) -> Option<InstalledModel> {
+        let installed = self.installed();
+        let id = self
+            .store
+            .get_setting::<String>(ACTIVE_KEY)
+            .ok()
+            .flatten();
+        if let Some(m) = id.and_then(|id| installed.iter().find(|m| m.entry.id == id)) {
+            return Some(m.clone());
+        }
+        let first = installed.into_iter().next()?;
+        if let Err(e) = self.store.set_setting(ACTIVE_KEY, &first.entry.id) {
+            tracing::warn!("could not persist the active model: {e:#}");
+        }
+        Some(first)
+    }
+
     pub fn set_active(&self, id: &str) -> Result<()> {
+        validate_id(id)?;
         if !self.installed().iter().any(|m| m.entry.id == id) {
             return Err(anyhow!("model {id} is not installed"));
         }
@@ -258,6 +329,9 @@ impl Manager {
     }
 
     pub fn disk_usage(&self, id: &str) -> u64 {
+        if validate_id(id).is_err() {
+            return 0;
+        }
         dir_size(&self.model_dir(id))
     }
 
@@ -363,6 +437,10 @@ impl Manager {
             None => {} // cancelled: pause()/cancel() own the final state
             Some((done, status, err)) => {
                 self.finish(&entry.id, run_gen);
+                if status == DlStatus::Installed {
+                    // Before the event goes out, so listeners already see the active model.
+                    self.ensure_active();
+                }
                 self.set_status(&entry, done, status, err);
             }
         }
@@ -614,7 +692,8 @@ mod tests {
             fx.files[1].1
         );
         assert!(m.disk_usage("hf:owner/name") >= 40_000);
-        assert!(m.active().is_none());
+        // The first installed model is activated automatically.
+        assert_eq!(m.active().unwrap().entry.id, "hf:owner/name");
         m.set_active("hf:owner/name").unwrap();
         assert_eq!(m.active().unwrap().entry.id, "hf:owner/name");
         m.delete("hf:owner/name").await.unwrap();
@@ -802,5 +881,96 @@ mod tests {
         m.install(fx.entry.clone());
         wait_for(&fx, |p| matches!(p.status, DlStatus::Failed(_))).await;
         assert!(!root.path().join("evil.onnx").exists());
+    }
+
+    #[tokio::test]
+    async fn rejects_unsafe_model_ids_everywhere() {
+        let fx = fixture().await;
+        let root = tempfile::tempdir().unwrap();
+        let models = root.path().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        // Something a traversal would reach: a sibling of the models dir.
+        std::fs::write(root.path().join("precious.txt"), b"x").unwrap();
+        let m = manager(&fx, &models);
+        for bad in ["..", "", ".", "...", "a b", "a\\b", "x\0y", "é"] {
+            assert!(m.delete(bad).await.is_err(), "delete({bad:?}) must fail");
+            assert!(m.set_active(bad).is_err(), "set_active({bad:?}) must fail");
+        }
+        assert!(root.path().join("precious.txt").exists());
+        assert!(models.exists());
+        for good in ["parakeet-v2", "hf:owner/name", "a.b_c-d"] {
+            assert!(validate_id(good).is_ok(), "{good}");
+        }
+    }
+
+    #[tokio::test]
+    async fn install_with_unsafe_id_or_path_creates_nothing_and_fails() {
+        let mut fx = fixture().await;
+        let root = tempfile::tempdir().unwrap();
+        let models = root.path().join("models");
+        let m = manager(&fx, &models);
+        fx.entry.id = "..".into();
+        m.install(fx.entry.clone());
+        wait_for(&fx, |p| matches!(p.status, DlStatus::Failed(_))).await;
+        fx.events.lock().unwrap().clear();
+        fx.entry.id = "hf:owner/name".into();
+        fx.entry.files[0].path = "../evil.onnx".into();
+        m.install(fx.entry.clone());
+        wait_for(&fx, |p| matches!(p.status, DlStatus::Failed(_))).await;
+        // Validation happens before the model dir or pending.json is written.
+        assert!(!m.model_dir("hf:owner/name").exists());
+        assert!(!models.exists() || std::fs::read_dir(&models).unwrap().count() == 0);
+    }
+
+    #[tokio::test]
+    async fn first_installed_model_becomes_active() {
+        let fx = fixture().await;
+        mount_ok(&fx).await;
+        let root = tempfile::tempdir().unwrap();
+        let m = manager(&fx, root.path());
+        assert!(m.active().is_none());
+        m.install(fx.entry.clone());
+        wait_for(&fx, |p| p.status == DlStatus::Installed).await;
+        assert_eq!(m.active().unwrap().entry.id, "hf:owner/name");
+    }
+
+    #[tokio::test]
+    async fn ensure_active_repairs_missing_or_stale_setting() {
+        let fx = fixture().await;
+        mount_ok(&fx).await;
+        let root = tempfile::tempdir().unwrap();
+        let m = manager(&fx, root.path());
+        m.install(fx.entry.clone());
+        wait_for(&fx, |p| p.status == DlStatus::Installed).await;
+        // Legacy "" value and a dangling id both count as "no valid active model".
+        for stale in ["", "gone"] {
+            fx.store.set_setting(ACTIVE_KEY, &stale.to_string()).unwrap();
+            assert_eq!(m.ensure_active().unwrap().entry.id, "hf:owner/name");
+            assert_eq!(
+                fx.store.get_setting::<String>(ACTIVE_KEY).unwrap().as_deref(),
+                Some("hf:owner/name")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn deleting_the_active_model_clears_setting_and_activates_another() {
+        let fx = fixture().await;
+        let root = tempfile::tempdir().unwrap();
+        let m = manager(&fx, root.path());
+        for id in ["a-model", "b-model"] {
+            let dir = m.model_dir(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut e = fx.entry.clone();
+            e.id = id.into();
+            std::fs::write(dir.join(MANIFEST), serde_json::to_vec(&e).unwrap()).unwrap();
+        }
+        m.set_active("a-model").unwrap();
+        m.delete("a-model").await.unwrap();
+        assert_eq!(m.active().unwrap().entry.id, "b-model");
+        m.delete("b-model").await.unwrap();
+        assert!(m.active().is_none());
+        // The key is removed, not stored as "".
+        assert_eq!(fx.store.get_setting::<String>(ACTIVE_KEY).unwrap(), None);
     }
 }

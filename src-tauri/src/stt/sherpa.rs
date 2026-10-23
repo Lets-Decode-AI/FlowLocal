@@ -32,6 +32,15 @@ impl SherpaEngine {
     }
 }
 
+/// Whisper language code: forced only for single-language models; multilingual models (or ones
+/// whose languages are unknown, e.g. from Hugging Face) get "" = auto-detect.
+fn whisper_language(languages: &[String]) -> String {
+    match languages {
+        [only] => only.clone(),
+        _ => String::new(),
+    }
+}
+
 /// `min(cores, 4)`.
 fn num_threads() -> i32 {
     std::thread::available_parallelism()
@@ -96,12 +105,7 @@ impl SttEngine for SherpaEngine {
                     encoder: path(m.file("encoder"))?,
                     decoder: path(m.file("decoder"))?,
                     tokens: path(m.file("tokens"))?,
-                    language: m
-                        .entry
-                        .languages
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "en".into()),
+                    language: whisper_language(&m.entry.languages),
                     num_threads: threads,
                     provider,
                     ..Default::default()
@@ -163,6 +167,16 @@ impl SttEngine for SherpaEngine {
 
 #[cfg(test)]
 mod tests {
+    use super::whisper_language;
+
+    #[test]
+    fn whisper_language_is_forced_only_for_single_language_models() {
+        assert_eq!(whisper_language(&["en".to_string()]), "en");
+        // Multilingual (or unknown) models must auto-detect, not be forced to the first entry.
+        assert_eq!(whisper_language(&["en".to_string(), "de".to_string()]), "");
+        assert_eq!(whisper_language(&[]), "");
+    }
+
     /// Proves sherpa-rs (and its native sherpa-onnx libs) link into the test binary.
     #[test]
     fn sherpa_links() {

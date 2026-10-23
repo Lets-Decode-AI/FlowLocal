@@ -58,6 +58,8 @@ pub struct Store {
 impl Store {
     pub fn open(path: &Path) -> Result<Store> {
         let conn = Connection::open(path)?;
+        // Explicit (rusqlite's default is also 5 s): wait for a competing writer, don't fail.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         // journal_mode returns a row, so read it rather than execute.
         conn.query_row("PRAGMA journal_mode=WAL", [], |_| Ok(()))?;
         Self::init(conn)
@@ -173,6 +175,12 @@ impl Store {
         Ok(())
     }
 
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        self.lock()?
+            .execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     pub fn dictionary_list(&self) -> Result<Vec<DictEntry>> {
         let conn = self.lock()?;
         let mut stmt = conn.prepare("SELECT id, term, replacement FROM dictionary ORDER BY id")?;
@@ -240,6 +248,26 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_store_waits_for_locks_instead_of_failing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("t.db")).unwrap();
+        let ms: i64 = store
+            .lock()
+            .unwrap()
+            .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ms, 5000);
+    }
+
+    #[test]
+    fn delete_setting_removes_the_key() {
+        let s = Store::open_in_memory().unwrap();
+        s.set_setting("k", &"v".to_string()).unwrap();
+        s.delete_setting("k").unwrap();
+        assert_eq!(s.get_setting::<String>("k").unwrap(), None);
+    }
 
     fn nt(ts: i64, text: &str) -> NewTranscript {
         NewTranscript {

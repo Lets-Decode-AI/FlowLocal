@@ -174,7 +174,7 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Speech worker.
     let stt = stt::SttWorker::spawn(Box::new(stt::SherpaEngine::new()), settings.idle_unload());
     if settings.preload
-        && let Some(m) = models.active()
+        && let Some(m) = models.ensure_active()
     {
         let stt = stt.clone();
         tauri::async_runtime::spawn(async move {

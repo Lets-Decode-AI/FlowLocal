@@ -64,7 +64,13 @@ impl HfClient {
         Self {
             base: DEFAULT_BASE.to_string(),
             token: std::sync::Arc::new(std::sync::RwLock::new(token)),
-            http: reqwest::Client::new(),
+            // No overall timeout (model files are large), but a stalled connection or a
+            // stream that stops delivering bytes must fail so the retry/pause logic runs.
+            http: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(15))
+                .read_timeout(std::time::Duration::from_secs(60))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
@@ -177,6 +183,12 @@ impl HfClient {
             files.push(ModelFile { path, size, sha256 });
         }
 
+        if raw.sha.is_empty() {
+            // Without a commit sha the download would track a moving ref.
+            return Ok(Inspection::Incompatible {
+                reason: "Hugging Face did not report a revision for this repository.".into(),
+            });
+        }
         let total: u64 = files.iter().map(|f| f.size).sum();
         let min_ram_gb = (total * 2).div_ceil(1_000_000_000) as u32;
         Ok(Inspection::Compatible(CatalogEntry {
@@ -444,5 +456,29 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(r, Inspection::Incompatible { .. }));
+    }
+
+    #[tokio::test]
+    async fn inspect_rejects_empty_revision_sha() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/models/o/m"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sha": "",
+                "siblings": [
+                    {"rfilename": "encoder.int8.onnx", "size": 10, "lfs": {"sha256": "aa"}},
+                    {"rfilename": "decoder.int8.onnx", "size": 10, "lfs": {"sha256": "bb"}},
+                    {"rfilename": "joiner.int8.onnx", "size": 10, "lfs": {"sha256": "cc"}},
+                    {"rfilename": "tokens.txt", "size": 10}
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let r = HfClient::new(None)
+            .with_base(&server.uri())
+            .inspect("o/m")
+            .await
+            .unwrap();
+        assert!(matches!(r, Inspection::Incompatible { .. }), "{r:?}");
     }
 }
