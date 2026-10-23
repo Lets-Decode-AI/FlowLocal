@@ -59,7 +59,7 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
+reported to the community leaders responsible for enforcement by
 opening a private report through the repository's GitHub Security Advisories
 ("Report a vulnerability" on the Security tab), or by contacting the
 maintainers listed in [CODEOWNERS](.github/CODEOWNERS) directly on GitHub. All complaints will be reviewed and investigated promptly and fairly.
