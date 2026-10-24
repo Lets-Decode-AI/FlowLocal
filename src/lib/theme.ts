@@ -4,7 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 export type ThemePref = 'system' | 'light' | 'dark';
 export type Theme = 'light' | 'dark';
 
-const KEY = 'flowlocal.theme';
+const KEY = 'uttr.theme';
 const media = () => window.matchMedia?.('(prefers-color-scheme: dark)');
 const listeners = new Set<() => void>();
 

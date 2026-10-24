@@ -5,6 +5,7 @@ pub mod dictation;
 pub mod events;
 pub mod hotkey;
 pub mod insert;
+mod migrate;
 pub mod models;
 pub mod permissions;
 mod postprocess;
@@ -39,7 +40,7 @@ fn open_main_window(app: &AppHandle, route: Option<&str>) -> tauri::Result<()> {
         return Ok(());
     }
     let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("FlowLocal")
+        .title("uttr")
         .inner_size(900.0, 620.0)
         .min_inner_size(760.0, 520.0);
     #[cfg(target_os = "macos")]
@@ -78,7 +79,7 @@ fn open_main_window(app: &AppHandle, route: Option<&str>) -> tauri::Result<()> {
     Ok(())
 }
 
-/// FlowLocal lives in the menu bar. While the main window is open it also gets a Dock icon and a
+/// uttr lives in the menu bar. While the main window is open it also gets a Dock icon and a
 /// Command-Tab entry, so the window can be found again after another app (such as System
 /// Settings) comes to the front.
 fn set_dock_presence(app: &AppHandle, visible: bool) {
@@ -126,7 +127,7 @@ fn position_flowbar(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open FlowLocal", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open uttr", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause dictation", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let models_menu = Submenu::with_id(app, "models", "Active model", true)?;
@@ -138,7 +139,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     }
 
     let mut builder = TrayIconBuilder::with_id("tray")
-        .tooltip("FlowLocal")
+        .tooltip("uttr")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => {
@@ -173,6 +174,11 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let handle = app.handle().clone();
     let data_dir = app.path().app_data_dir()?;
+    match migrate::move_legacy_data(&data_dir) {
+        Ok(true) => tracing::info!("moved data from {}", migrate::LEGACY_DIR_NAME),
+        Ok(false) => {}
+        Err(e) => tracing::warn!("could not move data from {}: {e}", migrate::LEGACY_DIR_NAME),
+    }
     std::fs::create_dir_all(&data_dir)?;
     let store = store::Store::open(&data_dir.join("flow.db"))?;
     let settings: app_state::Settings = store.get_setting(SETTINGS_KEY)?.unwrap_or_default();
@@ -331,7 +337,7 @@ pub fn run() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "flowlocal_lib=info".into()),
+                .unwrap_or_else(|_| "uttr_lib=info".into()),
         )
         .try_init();
     tauri::Builder::default()

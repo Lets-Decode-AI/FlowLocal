@@ -1,6 +1,6 @@
 //! Manual check: `cargo run --example insert -- "héllo 👋 世界"`, then focus a
 //! text field (e.g. TextEdit) within 3 s. The prior clipboard should survive.
-use flowlocal_lib::insert::{ClipboardInserter, Inserter, frontmost_app_name};
+use uttr_lib::insert::{ClipboardInserter, Inserter, frontmost_app_name};
 
 fn main() {
     let text = std::env::args()

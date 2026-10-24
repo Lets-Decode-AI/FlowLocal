@@ -1,17 +1,17 @@
 {
-  "name": "flowlocal",
+  "name": "uttr",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local, private push-to-talk dictation powered by sherpa-onnx speech models",
   "license": "MIT",
   "author": "Lets Decode AI contributors",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Lets-Decode-AI/FlowLocal.git"
+    "url": "git+https://github.com/Lets-Decode-AI/uttr.git"
   },
-  "homepage": "https://github.com/Lets-Decode-AI/FlowLocal",
+  "homepage": "https://github.com/Lets-Decode-AI/uttr",
   "bugs": {
-    "url": "https://github.com/Lets-Decode-AI/FlowLocal/issues"
+    "url": "https://github.com/Lets-Decode-AI/uttr/issues"
   },
   "type": "module",
   "scripts": {

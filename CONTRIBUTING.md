@@ -1,4 +1,4 @@
-# Contributing to FlowLocal
+# Contributing to uttr
 
 Thanks for contributing. This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 

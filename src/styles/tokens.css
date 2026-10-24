@@ -1,4 +1,4 @@
-/* Design tokens: the FlowLocal palette (forest #274B40, warm cream #F3F0E8), radii, type and motion.
+/* Design tokens: the uttr palette (forest #274B40, warm cream #F3F0E8), radii, type and motion.
    Light by default; src/lib/theme.ts sets data-theme="dark" on <html> for the dark palette. */
 :root {
   color-scheme: light;

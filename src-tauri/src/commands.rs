@@ -22,7 +22,7 @@ use crate::permissions::{self, PermKind, PermissionsStatus};
 use crate::store::{DictEntry, Transcript};
 
 const HISTORY_PAGE_SIZE: u32 = 50;
-const KEYRING_SERVICE: &str = "flowlocal";
+const KEYRING_SERVICE: &str = "uttr";
 const KEYRING_USER: &str = "hf_token";
 
 fn err<E: std::fmt::Display>(e: E) -> String {
@@ -98,7 +98,7 @@ pub fn spawn_hotkey_start(
     }
     // If the spawn fails the closure (and with it the guard) is dropped, clearing the flag.
     let _ = std::thread::Builder::new()
-        .name("flowlocal-hotkey-start".into())
+        .name("uttr-hotkey-start".into())
         .spawn(move || {
             let requested = settings
                 .lock()

@@ -2,7 +2,7 @@
 
 Automated tests cannot cover permissions, global shortcuts, synthetic paste or real apps. Run this checklist on a **release
 build** before you tag a release. Use a fresh app data directory (on macOS, move
-`~/Library/Application Support/com.flowlocal.app` aside) and install the `.dmg` into `/Applications`.
+`~/Library/Application Support/ai.letsdecode.uttr` aside) and install the `.dmg` into `/Applications`.
 
 Record the OS, version, date and results in the release PR.
 
@@ -34,7 +34,7 @@ For each of **TextEdit, a Safari textarea, VS Code and Slack**:
 ## 4. Performance
 
 - [ ] A 5 s utterance is inserted in under 500 ms after key-up on Apple Silicon. Check the timing in the logs, or use the numbers from the ignored integration test.
-- [ ] After 10 minutes idle with the model unloaded, all FlowLocal processes together use under 60 MB in Activity Monitor. Include the WebKit content process for the Flow Bar.
+- [ ] After 10 minutes idle with the model unloaded, all uttr processes together use under 60 MB in Activity Monitor. Include the WebKit content process for the Flow Bar.
 - [ ] The installer is under 25 MB.
 
 ## 5. Other platforms (best effort)

@@ -1,7 +1,7 @@
 //! Real-model STT tests. Ignored unless run with `--ignored`; they need a model directory:
 //!
 //!   scripts/fetch_test_model.sh
-//!   FLOWLOCAL_MODEL_DIR="$HOME/Library/Caches/FlowLocal Test é/parakeet-v2" \
+//!   UTTR_MODEL_DIR="$HOME/Library/Caches/uttr Test é/parakeet-v2" \
 //!     cargo test --release --test stt_integration -- --ignored --nocapture
 //!
 //! The directory must hold the model files plus a `manifest.json` (a catalog entry).
@@ -9,13 +9,13 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use flowlocal_lib::audio::{FRAME_LEN, SAMPLE_RATE};
-use flowlocal_lib::models::InstalledModel;
-use flowlocal_lib::models::catalog::CatalogEntry;
-use flowlocal_lib::stt::{Chunk, ChunkPlanner, ChunkerConfig, SherpaEngine, SttHandle, SttWorker};
+use uttr_lib::audio::{FRAME_LEN, SAMPLE_RATE};
+use uttr_lib::models::InstalledModel;
+use uttr_lib::models::catalog::CatalogEntry;
+use uttr_lib::stt::{Chunk, ChunkPlanner, ChunkerConfig, SherpaEngine, SttHandle, SttWorker};
 
 fn model() -> Option<InstalledModel> {
-    let dir = PathBuf::from(std::env::var_os("FLOWLOCAL_MODEL_DIR")?);
+    let dir = PathBuf::from(std::env::var_os("UTTR_MODEL_DIR")?);
     let entry: CatalogEntry =
         serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).expect("manifest.json"))
             .expect("manifest.json is a catalog entry");
@@ -92,10 +92,10 @@ fn wer_helper_sanity() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs FLOWLOCAL_MODEL_DIR (see scripts/fetch_test_model.sh)"]
+#[ignore = "needs UTTR_MODEL_DIR (see scripts/fetch_test_model.sh)"]
 async fn parakeet_wer_below_threshold() {
     let Some(m) = model() else {
-        return eprintln!("FLOWLOCAL_MODEL_DIR not set; skipping");
+        return eprintln!("UTTR_MODEL_DIR not set; skipping");
     };
     let h = SttWorker::spawn(Box::new(SherpaEngine::new()), None);
     let t = Instant::now();
@@ -127,10 +127,10 @@ async fn parakeet_wer_below_threshold() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs FLOWLOCAL_MODEL_DIR (see scripts/fetch_test_model.sh)"]
+#[ignore = "needs UTTR_MODEL_DIR (see scripts/fetch_test_model.sh)"]
 async fn streaming_60s_finish_under_1s() {
     let Some(m) = model() else {
-        return eprintln!("FLOWLOCAL_MODEL_DIR not set; skipping");
+        return eprintln!("UTTR_MODEL_DIR not set; skipping");
     };
     let h = SttWorker::spawn(Box::new(SherpaEngine::new()), None);
     h.preload(m.clone()).await.expect("load model");

@@ -55,10 +55,10 @@ fn path(p: PathBuf) -> Result<String> {
 }
 
 /// Execution providers to try, in order. CPU by default: measured on Apple Silicon, CoreML was
-/// ~1.5x slower than CPU for Parakeet (5 s clip: ~690 ms vs ~390 ms). `FLOWLOCAL_STT_PROVIDER=coreml`
+/// ~1.5x slower than CPU for Parakeet (5 s clip: ~690 ms vs ~390 ms). `UTTR_STT_PROVIDER=coreml`
 /// opts in to CoreML (falling back to CPU if it fails to load).
 fn transducer_providers() -> Vec<&'static str> {
-    match std::env::var("FLOWLOCAL_STT_PROVIDER").as_deref() {
+    match std::env::var("UTTR_STT_PROVIDER").as_deref() {
         Ok("coreml") => vec!["coreml", "cpu"],
         _ => vec!["cpu"],
     }

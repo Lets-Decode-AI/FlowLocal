@@ -1,12 +1,12 @@
-# FlowLocal
+# uttr
 
-[![CI](https://github.com/Lets-Decode-AI/FlowLocal/actions/workflows/ci.yml/badge.svg)](https://github.com/Lets-Decode-AI/FlowLocal/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/github/license/Lets-Decode-AI/FlowLocal)](LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/Lets-Decode-AI/FlowLocal?include_prereleases)](https://github.com/Lets-Decode-AI/FlowLocal/releases/latest)
+[![CI](https://github.com/Lets-Decode-AI/uttr/actions/workflows/ci.yml/badge.svg)](https://github.com/Lets-Decode-AI/uttr/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/Lets-Decode-AI/uttr)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/Lets-Decode-AI/uttr?include_prereleases)](https://github.com/Lets-Decode-AI/uttr/releases/latest)
 
 **Private push-to-talk dictation that runs on your computer.**
 
-Hold a shortcut in any app, speak, and let go. Punctuated text appears at your cursor. FlowLocal is an
+Hold a shortcut in any app, speak, and let go. Punctuated text appears at your cursor. uttr is an
 open-source alternative to tools like Wispr Flow. The difference is that speech recognition runs
 **on your computer** with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) models such as NVIDIA
 Parakeet. Your audio never leaves your machine, and there is no account or subscription.
@@ -24,13 +24,13 @@ models from Hugging Face inside the app.
 - In-app model manager with a list of recommended models, Hugging Face search, resumable downloads, SHA-256 verification, pause, resume, cancel and disk usage per model.
 - A model that suits your hardware is recommended on first run.
 - Streaming chunked transcription, so long dictations finish soon after you let go of the key.
-- Flow Bar: a small pill on top of other windows that shows when FlowLocal is listening, transcribing or done, and shows errors. It never takes focus.
+- Flow Bar: a small pill on top of other windows that shows when uttr is listening, transcribing or done, and shows errors. It never takes focus.
 - Text is inserted by pasting, and your clipboard (text or image) is restored afterwards. Only plain text and images are
-  restored. Rich formatting (HTML or RTF) comes back as plain text. If the clipboard held something FlowLocal cannot read,
-  such as files, FlowLocal leaves it alone instead of clearing it.
+  restored. Rich formatting (HTML or RTF) comes back as plain text. If the clipboard held something uttr cannot read,
+  such as files, uttr leaves it alone instead of clearing it.
 - Personal dictionary replacements, plus basic capitalization and spacing fixes.
 - Searchable history of your dictations, stored in SQLite on your machine.
-- Low resource use. FlowLocal stays in the tray at rest, and the model unloads after an idle timeout (10 minutes by default, or never).
+- Low resource use. uttr stays in the tray at rest, and the model unloads after an idle timeout (10 minutes by default, or never).
 - Optional Hugging Face token for gated or private repos, stored in the system keychain.
 - Open at login, microphone selection and a configurable shortcut.
 
@@ -52,13 +52,13 @@ _Screenshots will be added here. Contributions are welcome._
 ## Install
 
 Download the installer for your system from the
-[Releases page](https://github.com/Lets-Decode-AI/FlowLocal/releases/latest).
+[Releases page](https://github.com/Lets-Decode-AI/uttr/releases/latest).
 
 | OS | File | Notes |
 |---|---|---|
-| macOS (Apple Silicon) | `FlowLocal_<version>_aarch64.dmg` | |
-| macOS (Intel) | `FlowLocal_<version>_x64.dmg` | |
-| Windows (x64) | `FlowLocal_<version>_x64-setup.exe` | NSIS installer |
+| macOS (Apple Silicon) | `uttr_<version>_aarch64.dmg` | |
+| macOS (Intel) | `uttr_<version>_x64.dmg` | |
+| Windows (x64) | `uttr_<version>_x64-setup.exe` | NSIS installer |
 | Linux (x64) | `.AppImage` or `.deb` | |
 
 Models are not bundled. On first launch, setup downloads a recommended model
@@ -70,15 +70,15 @@ Release builds may be **unsigned**. They are signed and notarized only if the ma
 configured signing certificates. If macOS says the app "is damaged" or "cannot be opened because
 the developer cannot be verified":
 
-1. Drag FlowLocal to `/Applications`.
+1. Drag uttr to `/Applications`.
 2. Try to open it once. Then go to System Settings > Privacy & Security, scroll to Security and click **Open Anyway** (macOS 15 and later).
-3. Or run `xattr -dr com.apple.quarantine /Applications/FlowLocal.app` in Terminal.
+3. Or run `xattr -dr com.apple.quarantine /Applications/uttr.app` in Terminal.
 
-FlowLocal needs two permissions. Setup walks you through them (System Settings > Privacy & Security):
+uttr needs two permissions. Setup walks you through them (System Settings > Privacy & Security):
 
 - **Microphone**: records your voice.
-- **Accessibility**: lets FlowLocal read the global shortcut (the `Fn` key is read through an event tap) and send the paste keystroke.
-  Until you grant it, FlowLocal shows the message "Grant Accessibility access to turn on the shortcut." The shortcut starts working as soon as
+- **Accessibility**: lets uttr read the global shortcut (the `Fn` key is read through an event tap) and send the paste keystroke.
+  Until you grant it, uttr shows the message "Grant Accessibility access to turn on the shortcut." The shortcut starts working as soon as
   you grant it. You do not need to relaunch.
 
 If you use the `Fn` or Globe key as the shortcut, set System Settings > Keyboard > "Press 🌐 key to" to **Do Nothing**.
@@ -95,13 +95,13 @@ Run the installer. For unsigned builds, Windows SmartScreen may warn about an un
 - **Wayland**: the global shortcut is not available yet, and the app shows "The global shortcut is not available on Wayland."
   Use an X11 session for now. Where synthetic paste is blocked, the text stays on the clipboard and you paste it yourself.
   Support through the XDG GlobalShortcuts portal is on the [Roadmap](#roadmap).
-- Make the AppImage executable (`chmod +x FlowLocal_*.AppImage`) or install the `.deb` with `sudo apt install ./FlowLocal_*.deb`.
+- Make the AppImage executable (`chmod +x uttr_*.AppImage`) or install the `.deb` with `sudo apt install ./uttr_*.deb`.
 
 ## Supported models
 
 The model list is bundled in the app ([`src-tauri/resources/catalog.json`](src-tauri/resources/catalog.json)),
 with sizes and SHA-256 hashes pinned to specific Hugging Face revisions. You can also search Hugging Face
-from the app for other sherpa-onnx repos. FlowLocal detects compatible transducer, Whisper, Moonshine and SenseVoice layouts.
+from the app for other sherpa-onnx repos. uttr detects compatible transducer, Whisper, Moonshine and SenseVoice layouts.
 
 | Model | Engine | Download | Languages | Min RAM |
 |---|---|---|---|---|
@@ -113,7 +113,7 @@ from the app for other sherpa-onnx repos. FlowLocal detects compatible transduce
 | SenseVoice small (int8) | SenseVoice | ~239 MB | Chinese, English, Japanese, Korean, Cantonese | 2 GB |
 | Whisper large-v3-turbo (int8) | Whisper | ~1 GB | Multilingual (35 languages listed in the catalog) | 6 GB |
 
-On first run FlowLocal recommends Moonshine Base on machines with little RAM, Parakeet v3 or SenseVoice when they match
+On first run uttr recommends Moonshine Base on machines with little RAM, Parakeet v3 or SenseVoice when they match
 your system language, and Parakeet v2 otherwise.
 
 ### Measured performance
@@ -135,7 +135,7 @@ speak, a **chunk planner** watches the live 16 kHz audio and cuts it at natural 
 - Silent chunks are skipped.
 
 When you release the key, only the short final chunk is left. The wait after key-up depends on that chunk, not on how
-long you talked. FlowLocal joins the chunk texts in order, post-processes them and pastes the result.
+long you talked. uttr joins the chunk texts in order, post-processes them and pastes the result.
 
 ## Architecture
 
@@ -182,8 +182,8 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librs
 ```
 
 ```bash
-git clone https://github.com/Lets-Decode-AI/FlowLocal.git
-cd FlowLocal
+git clone https://github.com/Lets-Decode-AI/uttr.git
+cd uttr
 npm ci
 npm run tauri dev      # run the app with hot reload
 npm run tauri build    # produce an installer for your OS in src-tauri/target/release/bundle
@@ -210,13 +210,13 @@ The real-model integration tests (word error rate on fixtures, streaming latency
 ~660 MB model. To run them:
 
 ```bash
-scripts/fetch_test_model.sh          # downloads Parakeet v2 int8 to ~/Library/Caches/FlowLocal Test é/parakeet-v2
+scripts/fetch_test_model.sh          # downloads Parakeet v2 int8 to ~/Library/Caches/uttr Test é/parakeet-v2
 cd src-tauri
-FLOWLOCAL_MODEL_DIR="$HOME/Library/Caches/FlowLocal Test é/parakeet-v2" \
+UTTR_MODEL_DIR="$HOME/Library/Caches/uttr Test é/parakeet-v2" \
   cargo test --release --test stt_integration -- --ignored --nocapture
 ```
 
-On Linux pass a destination directory to the script and use the same path for `FLOWLOCAL_MODEL_DIR`.
+On Linux pass a destination directory to the script and use the same path for `UTTR_MODEL_DIR`.
 The manual end-to-end checks for dictation in real apps are listed in [docs/E2E-CHECKLIST.md](docs/E2E-CHECKLIST.md).
 
 ## Roadmap
@@ -244,6 +244,6 @@ For questions, see [SUPPORT.md](SUPPORT.md).
 - [NVIDIA NeMo Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) speech models.
 - [OpenAI Whisper](https://github.com/openai/whisper), [Moonshine](https://github.com/moonshine-ai/moonshine) and [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) models.
 - [Tauri](https://tauri.app) for the app framework.
-- Inspired by [Wispr Flow](https://wisprflow.ai). FlowLocal is an independent project and is not affiliated with Wispr.
+- Inspired by [Wispr Flow](https://wisprflow.ai). uttr is an independent project and is not affiliated with Wispr.
 
 Model weights are downloaded from their upstream repositories and remain under their own licenses.

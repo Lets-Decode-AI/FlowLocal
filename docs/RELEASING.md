@@ -1,4 +1,4 @@
-# Releasing FlowLocal
+# Releasing uttr
 
 Pushing a tag that matches `v*` runs `.github/workflows/release.yml`. The workflow builds all
 four targets with `tauri-apps/tauri-action` and creates a **draft** GitHub Release with the installers and

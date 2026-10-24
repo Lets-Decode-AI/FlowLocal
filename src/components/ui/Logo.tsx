@@ -1,8 +1,8 @@
-import forestTile from '../../assets/brand/flowlocal-icon-forest.svg';
-import creamTile from '../../assets/brand/flowlocal-icon-cream.svg';
+import forestTile from '../../assets/brand/uttr-icon-forest.svg';
+import creamTile from '../../assets/brand/uttr-icon-cream.svg';
 import { useTheme } from '../../lib/theme';
 
-/** The FlowLocal app tile: forest on the light theme, cream on the dark theme. */
+/** The uttr app tile: forest on the light theme, cream on the dark theme. */
 export default function Logo({ size = 24, label }: { size?: number; label?: string }) {
   const { theme } = useTheme();
   return (

@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Questions and ideas (Discussions)
-    url: https://github.com/Lets-Decode-AI/FlowLocal/discussions
+    url: https://github.com/Lets-Decode-AI/uttr/discussions
     about: Ask questions, share setups and discuss ideas before you file an issue.
   - name: Report a security vulnerability
-    url: https://github.com/Lets-Decode-AI/FlowLocal/security/advisories/new
+    url: https://github.com/Lets-Decode-AI/uttr/security/advisories/new
     about: Report security problems privately, not as a public issue.

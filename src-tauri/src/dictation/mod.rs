@@ -196,7 +196,7 @@ fn spawn_recorder_thread(
 ) -> Sender<RecCmd> {
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
     std::thread::Builder::new()
-        .name("flowlocal-recorder-ctl".into())
+        .name("uttr-recorder-ctl".into())
         .spawn(move || {
             for cmd in cmd_rx {
                 match cmd {
@@ -304,7 +304,7 @@ fn spawn_pump(
     tx: UnboundedSender<Msg>,
 ) -> std::io::Result<Pump> {
     std::thread::Builder::new()
-        .name("flowlocal-pump".into())
+        .name("uttr-pump".into())
         .spawn(move || {
             let mut planner = ChunkPlanner::new(ChunkerConfig::default());
             while let Ok(frame) = frames.recv() {

@@ -1,7 +1,7 @@
 //! Manual check: `cargo run --example hotkeys`, then hold / double-tap the
 //! default hotkey (Fn on macOS) and press Esc. Needs Accessibility granted to
 //! the terminal; without it this prints a clean TapUnavailable error.
-use flowlocal_lib::hotkey::{HotkeyService, default_binding};
+use uttr_lib::hotkey::{HotkeyService, default_binding};
 
 fn main() {
     let (tx, rx) = std::sync::mpsc::channel();

@@ -28,7 +28,7 @@ export default function Sidebar({ route }: { route: string }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-drag" data-tauri-drag-region />
-      <div className="side-brand"><Logo size={22} />FlowLocal</div>
+      <div className="side-brand"><Logo size={22} />uttr</div>
       <nav>
         {NAV.map((n) => (
           <a key={n.label} href={`#${n.route}`} className={`nav${route === n.route ? ' nav-on' : ''}`} aria-current={route === n.route ? 'page' : undefined}><Icon name={n.icon} />{n.label}</a>

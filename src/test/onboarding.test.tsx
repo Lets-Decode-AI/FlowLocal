@@ -9,7 +9,7 @@ const entry = (id: string, name: string) => ({
 const settings = {
   hotkey: { keys: ['Fn'] }, mic: null, showFlowbar: true, idleUnloadMin: 10, preload: true, launchAtLogin: false, onboarded: false,
 };
-const transcript = { id: 7, createdAt: 1, text: 'Hello from FlowLocal', rawText: 'hello from flowlocal', appName: null, durationMs: 2000, wordCount: 3, wpm: 90.4, modelId: 'm1' };
+const transcript = { id: 7, createdAt: 1, text: 'Hello from uttr', rawText: 'hello from uttr', appName: null, durationMs: 2000, wordCount: 3, wpm: 90.4, modelId: 'm1' };
 
 vi.mock('../ipc', () => ({
   api: {
@@ -84,7 +84,7 @@ describe('Onboarding flow', () => {
   it('welcome_says_this_mac_on_macos_and_this_computer_elsewhere', async () => {
     render(<Onboarding />);
     await flush();
-    expect(screen.getByRole('heading', { name: 'FlowLocal' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'uttr' })).toBeTruthy();
     expect(screen.getByText('Dictate into any app. Speech is turned into text on this Mac and never leaves it.')).toBeTruthy();
     cleanup();
     setPlatform('Win32');
@@ -200,20 +200,20 @@ describe('Permissions step', () => {
     render(<Onboarding />);
     await flush();
     await toStep(3);
-    expect(screen.queryByRole('button', { name: /restart flowlocal/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /restart uttr/i })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /allow accessibility/i }));
     await flush();
-    fireEvent.click(screen.getByRole('button', { name: /restart flowlocal/i }));
+    fireEvent.click(screen.getByRole('button', { name: /restart uttr/i }));
     expect(a.restartApp).toHaveBeenCalled();
   });
 
   it('resumes_at_the_saved_step_after_restart', async () => {
-    window.localStorage.setItem('flowlocal.onboardingStep', '2');
+    window.localStorage.setItem('uttr.onboardingStep', '2');
     a.permissionsStatus.mockResolvedValue({ microphone: 'granted', accessibility: 'denied' });
     render(<Onboarding />);
     await flush();
     expect(screen.getByRole('heading', { name: /permissions/i })).toBeTruthy();
-    window.localStorage.removeItem('flowlocal.onboardingStep');
+    window.localStorage.removeItem('uttr.onboardingStep');
   });
 });
 
@@ -326,10 +326,10 @@ describe('Try it step', () => {
     emit('transcriptAdded', { id: 7 });
     await flush();
     expect(screen.getByText("You're set up.")).toBeTruthy();
-    expect(screen.getByText('Hello from FlowLocal')).toBeTruthy();
+    expect(screen.getByText('Hello from uttr')).toBeTruthy();
     expect(screen.getByText('3 words · 90 WPM')).toBeTruthy();
     expect(a.settingsSet).toHaveBeenCalledWith({ ...settings, onboarded: true });
-    fireEvent.click(screen.getByRole('button', { name: /start using flowlocal/i }));
+    fireEvent.click(screen.getByRole('button', { name: /start using uttr/i }));
     expect(window.location.hash).toBe('#/history');
   });
 });
