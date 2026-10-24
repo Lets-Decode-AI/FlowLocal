@@ -77,7 +77,20 @@ pub fn open_settings(kind: PermKind) -> Result<(), String> {
                     .ok_or_else(|| format!("`open` failed: {s}"))
             })
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // Windows can silently feed desktop apps a muted microphone; this is where it is allowed.
+        if kind == PermKind::Microphone {
+            // explorer.exe's exit status is meaningless, so only a failure to launch is reported.
+            return std::process::Command::new("explorer")
+                .arg("ms-settings:privacy-microphone")
+                .status()
+                .map(drop)
+                .map_err(|e| e.to_string());
+        }
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = kind;
         Ok(())

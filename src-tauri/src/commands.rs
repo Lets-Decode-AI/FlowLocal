@@ -428,3 +428,11 @@ pub fn hf_token_set(st: State<'_, AppState>, token: Option<String>) -> Result<()
 pub fn mic_list() -> Vec<String> {
     crate::audio::list_devices()
 }
+
+/// Opens the folder holding `uttr.log`, for attaching to bug reports.
+#[tauri::command]
+pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    crate::logging::reveal(&dir)
+}

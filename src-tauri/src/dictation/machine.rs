@@ -21,6 +21,16 @@ pub const ERROR_SHOWN_FOR: Duration = Duration::from_secs(2);
 /// Shown (state + toast) when the OS denies microphone access.
 pub const MIC_DENIED: &str = "Microphone access is turned off.";
 
+/// Shown when a recording had sound but no speech.
+pub const NO_SPEECH: &str = "Didn't catch that. Try again.";
+
+/// Shown when the microphone delivered only silence (muted, wrong device, or blocked by the OS).
+#[cfg(target_os = "windows")]
+pub const MIC_SILENT: &str =
+    "No sound from the mic. Check the microphone in Settings and Windows privacy settings.";
+#[cfg(not(target_os = "windows"))]
+pub const MIC_SILENT: &str = "No sound from the mic. Check the microphone in Settings.";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum State {
     Idle,
@@ -61,8 +71,11 @@ pub enum Input {
     MicDenied,
     /// The oldest in-flight utterance finished transcribing (results arrive in utterance order).
     Transcribed(Result<String, SttError>),
-    /// The oldest in-flight utterance contained no speech.
-    NoSpeech,
+    /// The oldest in-flight utterance contained no speech. `silent`: the microphone delivered
+    /// no sound at all.
+    NoSpeech {
+        silent: bool,
+    },
     Inserted(InsertOutcome),
     /// The oldest in-flight utterance failed outside the speech engine (recorder stop, insert).
     Failed(String),
@@ -80,6 +93,8 @@ pub enum Effect {
     Persist,
     /// Surface an error without changing the foreground state (a recording is in progress).
     ShowError(String),
+    /// Surface a warning without changing the foreground state.
+    ShowWarning(String),
     ArmEsc(bool),
     Emit(State),
 }
@@ -112,6 +127,10 @@ fn finish(old: &State, new: State, mut fx: Vec<Effect>) -> (State, Vec<Effect>) 
         fx.push(Effect::Emit(new.clone()));
     }
     (new, fx)
+}
+
+fn no_speech_warning(silent: bool) -> Effect {
+    Effect::ShowWarning(if silent { MIC_SILENT } else { NO_SPEECH }.into())
 }
 
 pub fn step(state: State, input: Input, now: Instant) -> (State, Vec<Effect>) {
@@ -214,8 +233,10 @@ pub fn step(state: State, input: Input, now: Instant) -> (State, Vec<Effect>) {
         (_, Input::Transcribed(Ok(text))) if !text.trim().is_empty() => {
             finish(&old, State::Inserting, vec![Effect::Insert(text)])
         }
-        (State::Recording { .. }, Input::Transcribed(Ok(_))) => (old, vec![]),
-        (_, Input::Transcribed(Ok(_))) => finish(&old, State::Idle, vec![]),
+        (State::Recording { .. }, Input::Transcribed(Ok(_))) => {
+            (old, vec![no_speech_warning(false)])
+        }
+        (_, Input::Transcribed(Ok(_))) => finish(&old, State::Idle, vec![no_speech_warning(false)]),
         (State::Recording { .. }, Input::Transcribed(Err(e))) => {
             (old, vec![Effect::ShowError(e.to_string())])
         }
@@ -224,7 +245,10 @@ pub fn step(state: State, input: Input, now: Instant) -> (State, Vec<Effect>) {
         (State::Recording { .. }, Input::Failed(msg)) => (old, vec![Effect::ShowError(msg)]),
         (_, Input::Failed(msg)) => finish(&old, error(msg, now), vec![]),
 
-        (State::Transcribing, Input::NoSpeech) => finish(&old, State::Idle, vec![]),
+        (State::Transcribing, Input::NoSpeech { silent }) => {
+            finish(&old, State::Idle, vec![no_speech_warning(silent)])
+        }
+        (_, Input::NoSpeech { silent }) => (old, vec![no_speech_warning(silent)]),
         (State::Inserting, Input::Inserted(_)) => finish(&old, State::Idle, vec![Effect::Persist]),
         (_, Input::Inserted(_)) => (old, vec![Effect::Persist]),
 
@@ -249,6 +273,30 @@ mod tests {
     }
     fn has(effects: &[Effect], e: &Effect) -> bool {
         effects.contains(e)
+    }
+
+    #[test]
+    fn no_speech_returns_to_idle_and_warns() {
+        let t = Instant::now();
+        let (s, fx) = step(State::Transcribing, Input::NoSpeech { silent: false }, t);
+        assert_eq!(s, State::Idle);
+        assert!(has(&fx, &Effect::ShowWarning(NO_SPEECH.into())));
+        assert!(has(&fx, &Effect::Emit(State::Idle)));
+    }
+
+    #[test]
+    fn silent_mic_gets_its_own_warning() {
+        let t = Instant::now();
+        let (_, fx) = step(State::Transcribing, Input::NoSpeech { silent: true }, t);
+        assert!(has(&fx, &Effect::ShowWarning(MIC_SILENT.into())));
+    }
+
+    #[test]
+    fn no_speech_during_a_new_recording_warns_without_stopping_it() {
+        let t = Instant::now();
+        let (s, fx) = step(rec(t, false), Input::NoSpeech { silent: false }, t);
+        assert_eq!(s, rec(t, false));
+        assert_eq!(fx, vec![Effect::ShowWarning(NO_SPEECH.into())]);
     }
 
     #[test]

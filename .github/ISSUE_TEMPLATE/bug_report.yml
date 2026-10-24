@@ -71,5 +71,5 @@ body:
     id: logs
     attributes:
       label: Logs or screenshots
-      description: Remove anything private. Dictated text can be sensitive.
+      description: "Settings → Troubleshooting → Log file → Show opens the folder with uttr.log. Remove anything private. Dictated text can be sensitive."
       render: shell

@@ -19,6 +19,7 @@ vi.mock('../ipc', () => ({
     modelInstall: vi.fn(async () => {}), modelPause: vi.fn(async () => {}), modelResume: vi.fn(async () => {}),
     modelCancel: vi.fn(async () => {}), modelSetActive: vi.fn(async () => {}),
     historyList: vi.fn(), settingsGet: vi.fn(), settingsSet: vi.fn(async () => {}),
+    micList: vi.fn(async () => ['Built-in Mic', 'USB Headset']),
   },
   on: vi.fn(async (name: string, cb: (p: any) => void) => {
     (handlers[name] ||= []).push(cb);
@@ -319,6 +320,19 @@ describe('Try it step', () => {
     const st = screen.getByRole('status');
     expect(st.textContent).not.toMatch(/cpal/);
     expect(st.className).not.toMatch(/listening-on/);
+  });
+
+  it('try_it_lets_you_switch_microphone', async () => {
+    await toTryIt();
+    const picker = screen.getByRole('combobox', { name: 'Microphone' }) as HTMLSelectElement;
+    expect(picker.value).toBe('');
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['System default', 'Built-in Mic', 'USB Headset']);
+    fireEvent.change(picker, { target: { value: 'USB Headset' } });
+    await flush();
+    expect(a.settingsSet).toHaveBeenCalledWith({ ...settings, mic: 'USB Headset' });
+    fireEvent.change(picker, { target: { value: '' } });
+    await flush();
+    expect(a.settingsSet).toHaveBeenLastCalledWith({ ...settings, mic: null });
   });
 
   it('try_it_shows_transcript_and_finish', async () => {

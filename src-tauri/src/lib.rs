@@ -5,6 +5,7 @@ pub mod dictation;
 pub mod events;
 pub mod hotkey;
 pub mod insert;
+pub mod logging;
 mod migrate;
 pub mod models;
 pub mod permissions;
@@ -334,12 +335,6 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "uttr_lib=info".into()),
-        )
-        .try_init();
     tauri::Builder::default()
         // Must be the first plugin: a second launch hands over to this instance and exits.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -378,8 +373,10 @@ pub fn run() {
             commands::dictionary_add,
             commands::dictionary_delete,
             commands::mic_list,
+            commands::open_log_folder,
         ])
         .setup(|app| {
+            logging::init(app.path().app_log_dir().ok().as_deref());
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             init_backend(app)?;
