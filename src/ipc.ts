@@ -122,6 +122,7 @@ export const api = {
   permissionsStatus: () => invoke<PermissionsStatus>('permissions_status'),
   openPermissionSettings: (kind: PermKind) => invoke<void>('open_permission_settings', { kind }),
   requestMicrophone: () => invoke<void>('request_microphone'),
+  restartApp: () => invoke<void>('restart_app'),
 
   catalog: () => invoke<CatalogEntry[]>('catalog'),
   installed: () => invoke<InstalledModelDto[]>('installed'),

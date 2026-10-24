@@ -23,6 +23,8 @@ function Accessory({ status, name, onAllow }: { status: Perm | null; name: strin
 export default function Permissions({ onNext, onBack }: StepProps) {
   const toast = useToast();
   const [p, setP] = useState<PermissionsStatus | null>(null);
+  // macOS often only applies a new Accessibility grant to a running app after it restarts.
+  const [askedAccessibility, setAskedAccessibility] = useState(false);
   useEffect(() => {
     let live = true;
     const poll = () => api.permissionsStatus().then((s) => live && setP(s), () => {});
@@ -49,9 +51,15 @@ export default function Permissions({ onNext, onBack }: StepProps) {
         />
         <Row
           icon="keyboard" label="Accessibility" detail="Insert the text into the app you are using."
-          accessory={<Accessory status={acc} name="Accessibility" onAllow={() => attempt(() => api.openPermissionSettings('accessibility'))} />}
+          accessory={<Accessory status={acc} name="Accessibility" onAllow={() => { setAskedAccessibility(true); attempt(() => api.openPermissionSettings('accessibility')); }} />}
         />
       </Group>
+      {mac && askedAccessibility && acc !== null && !ok(acc) && (
+        <div className="onb-restart" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <p className="muted">Already turned on FlowLocal in Accessibility? Restart FlowLocal so macOS applies it.</p>
+          <Button onClick={() => attempt(api.restartApp)}>Restart FlowLocal</Button>
+        </div>
+      )}
     </StepFrame>
   );
 }

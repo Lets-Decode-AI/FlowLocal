@@ -46,6 +46,7 @@ export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
     try {
       const s = await api.settingsGet();
       await api.settingsSet({ ...s, onboarded: true });
+      try { window.localStorage.removeItem('flowlocal.onboardingStep'); } catch { /* storage unavailable */ }
     } catch (e) {
       toast(errMsg(e), 'error');
     }

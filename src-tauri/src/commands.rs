@@ -251,6 +251,13 @@ pub fn request_microphone() {
     permissions::request_microphone();
 }
 
+/// Relaunch the app. macOS often applies a new Accessibility grant to a running app only after
+/// it restarts.
+#[tauri::command]
+pub fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
 // ---- models --------------------------------------------------------------------------------
 
 #[tauri::command]
