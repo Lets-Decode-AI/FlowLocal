@@ -155,7 +155,7 @@ impl Recorder {
             closed: closed.clone(),
         };
         let join = std::thread::Builder::new()
-            .name("flowlocal-audio".into())
+            .name("uttr-audio".into())
             .spawn(move || run_worker(ctx, ready_tx))
             .map_err(|e| RecorderError::Other(e.to_string()))?;
         let handle = Handle {

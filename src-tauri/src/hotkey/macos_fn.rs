@@ -67,7 +67,7 @@ fn from_keycode(keycode: i64) -> Option<Key> {
 pub fn start(core: Arc<Mutex<Core>>, stopped: Arc<AtomicBool>) -> Result<(), HotkeyError> {
     let (ready_tx, ready_rx) = mpsc::channel::<Result<(), HotkeyError>>();
     std::thread::Builder::new()
-        .name("flowlocal-hotkey".into())
+        .name("uttr-hotkey".into())
         .spawn(move || run(core, stopped, ready_tx))
         .map_err(|e| HotkeyError::Backend(e.to_string()))?;
     ready_rx

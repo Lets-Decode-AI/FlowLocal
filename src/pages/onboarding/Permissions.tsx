@@ -43,7 +43,7 @@ export default function Permissions({ onNext, onBack }: StepProps) {
       extra={mac && pending ? <Button variant="plain" size="large" onClick={onNext}>Continue without</Button> : undefined}
       note={`You can change these later in ${where}.`}>
       <h1>Permissions</h1>
-      <p className="muted">FlowLocal needs two permissions to hear you and type for you.</p>
+      <p className="muted">uttr needs two permissions to hear you and type for you.</p>
       <Group>
         <Row
           icon="mic" label="Microphone" detail="Record your voice while you hold the shortcut."
@@ -56,8 +56,8 @@ export default function Permissions({ onNext, onBack }: StepProps) {
       </Group>
       {mac && askedAccessibility && acc !== null && !ok(acc) && (
         <div className="onb-restart" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <p className="muted">Already turned on FlowLocal in Accessibility? Restart FlowLocal so macOS applies it.</p>
-          <Button onClick={() => attempt(api.restartApp)}>Restart FlowLocal</Button>
+          <p className="muted">Already turned on uttr in Accessibility? Restart uttr so macOS applies it.</p>
+          <Button onClick={() => attempt(api.restartApp)}>Restart uttr</Button>
         </div>
       )}
     </StepFrame>

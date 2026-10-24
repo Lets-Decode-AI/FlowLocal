@@ -65,7 +65,7 @@ where
 {
     let (err_tx, err_rx) = mpsc::channel::<String>();
     std::thread::Builder::new()
-        .name("flowlocal-hotkey".into())
+        .name("uttr-hotkey".into())
         .spawn(move || {
             if let Err(msg) = listen() {
                 tracing::error!("rdev listener exited: {msg}");

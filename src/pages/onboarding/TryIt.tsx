@@ -46,7 +46,7 @@ export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
     try {
       const s = await api.settingsGet();
       await api.settingsSet({ ...s, onboarded: true });
-      try { window.localStorage.removeItem('flowlocal.onboardingStep'); } catch { /* storage unavailable */ }
+      try { window.localStorage.removeItem('uttr.onboardingStep'); } catch { /* storage unavailable */ }
     } catch (e) {
       toast(errMsg(e), 'error');
     }
@@ -63,7 +63,7 @@ export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
             <p className="muted">{transcript.wordCount} {transcript.wordCount === 1 ? 'word' : 'words'} · {Math.round(transcript.wpm)} WPM</p>
           </>
         )}
-        <Button variant="primary" size="large" onClick={() => navigate('/history')}>Start using FlowLocal</Button>
+        <Button variant="primary" size="large" onClick={() => navigate('/history')}>Start using uttr</Button>
       </StepFrame>
     );
   }

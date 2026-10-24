@@ -36,7 +36,7 @@ impl SttWorker {
     pub fn spawn(engine: Box<dyn SttEngine>, idle_unload: Option<Duration>) -> SttHandle {
         let (tx, rx) = mpsc::channel();
         std::thread::Builder::new()
-            .name("flowlocal-stt".into())
+            .name("uttr-stt".into())
             .spawn(move || run(engine, idle_unload, rx))
             .expect("spawn stt worker thread");
         SttHandle { tx }

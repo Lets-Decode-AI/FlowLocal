@@ -8,7 +8,7 @@ import Welcome from './onboarding/Welcome';
 import { useDownloads } from './onboarding/useDownloads';
 
 // Remembered so a restart (needed on macOS to pick up Accessibility) resumes the same step.
-const STEP_KEY = 'flowlocal.onboardingStep';
+const STEP_KEY = 'uttr.onboardingStep';
 
 function savedStep(): number {
   try {

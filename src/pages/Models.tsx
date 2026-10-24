@@ -172,7 +172,7 @@ function HfSearch({ progress, installedIds, onInstalled }: { progress: Record<st
   return (
     <>
       <SearchField label="Search Hugging Face" placeholder="Search Hugging Face" value={q} onChange={setQ} />
-      {results === null && <p className="muted empty-note">Search for a sherpa-onnx model repository, then check that it works with FlowLocal.</p>}
+      {results === null && <p className="muted empty-note">Search for a sherpa-onnx model repository, then check that it works with uttr.</p>}
       {results?.length === 0 && !loading && <p className="muted empty-note">No repositories found.</p>}
       {results && results.length > 0 && (
         <Group>
@@ -187,7 +187,7 @@ function HfSearch({ progress, installedIds, onInstalled }: { progress: Record<st
                   <>
                     {r.downloads.toLocaleString()} downloads · {r.likes} likes
                     {ins?.kind === 'incompatible' && <><br /><span className="ui-row-error">{ins.reason}</span></>}
-                    {ins?.kind === 'compatible' && <><br />Works with FlowLocal · {ins.engine} · {size(ins)}</>}
+                    {ins?.kind === 'compatible' && <><br />Works with uttr · {ins.engine} · {size(ins)}</>}
                     {status && <><br />{typeof status === 'string' ? status : 'Download failed'}</>}
                   </>
                 }
