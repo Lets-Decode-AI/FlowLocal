@@ -1,23 +1,28 @@
-/* Design tokens: Apple system colors, radii, type and motion. Light first, dark follows the OS. */
+/* Design tokens: the FlowLocal palette (forest #274B40, warm cream #F3F0E8), radii, type and motion.
+   Light by default; src/lib/theme.ts sets data-theme="dark" on <html> for the dark palette. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 
-  --accent: #007AFF;
-  --green: #34C759;
-  --red: #FF3B30;
-  --orange: #FF9500;
-  --accent-tint: rgba(0, 122, 255, 0.14);
-  --accent-fg: #fff;
+  --forest: #274B40;
+  --cream: #F3F0E8;
 
-  --window-bg: #F5F5F7;
-  --surface: #FFFFFF;
-  --label: #1D1D1F;
-  --label-secondary: rgba(60, 60, 67, 0.6);
-  --separator: rgba(60, 60, 67, 0.18);
-  --fill: rgba(120, 120, 128, 0.12);
-  --sidebar-bg: #EBEBED;
-  --focus-ring: rgba(0, 122, 255, 0.4);
+  --accent: var(--forest);
+  --green: #3D7A57;
+  --red: #B5473A;
+  --orange: #B87428;
+  --accent-tint: rgba(39, 75, 64, 0.12);
+  --accent-fg: var(--cream);
+
+  --window-bg: var(--cream);
+  --surface: #FBFAF6;
+  --label: #1E2A25;
+  --label-secondary: rgba(30, 42, 37, 0.62);
+  --separator: rgba(39, 75, 64, 0.16);
+  --fill: rgba(39, 75, 64, 0.08);
+  --sidebar-bg: #E9E5DA;
+  --sidebar-tint: rgba(233, 229, 218, 0.6);
+  --focus-ring: rgba(39, 75, 64, 0.35);
 
   --radius-group: 10px;
   --radius-control: 6px;
@@ -26,21 +31,23 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur: 180ms;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --accent: #0A84FF;
-    --green: #30D158;
-    --red: #FF453A;
-    --orange: #FF9F0A;
-    --accent-tint: rgba(10, 132, 255, 0.24);
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-    --window-bg: #1E1E1E;
-    --surface: #2A2A2C;
-    --label: #F5F5F7;
-    --label-secondary: rgba(235, 235, 245, 0.6);
-    --separator: rgba(84, 84, 88, 0.6);
-    --fill: rgba(120, 120, 128, 0.24);
-    --sidebar-bg: #262628;
-    --focus-ring: rgba(10, 132, 255, 0.5);
-  }
+  --accent: #8DB8A6;
+  --green: #7CC29A;
+  --red: #E07A68;
+  --orange: #E0A35A;
+  --accent-tint: rgba(141, 184, 166, 0.18);
+  --accent-fg: #12201B;
+
+  --window-bg: #121A17;
+  --surface: #1B2622;
+  --label: var(--cream);
+  --label-secondary: rgba(243, 240, 232, 0.6);
+  --separator: rgba(243, 240, 232, 0.12);
+  --fill: rgba(243, 240, 232, 0.08);
+  --sidebar-bg: #16201C;
+  --sidebar-tint: rgba(22, 32, 28, 0.6);
+  --focus-ring: rgba(141, 184, 166, 0.45);
 }

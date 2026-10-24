@@ -7,8 +7,10 @@
   width: 216px; flex: none; display: flex; flex-direction: column; padding: 52px 10px 12px;
   background: var(--sidebar-bg); border-right: 1px solid var(--separator); position: relative;
 }
-.platform-mac .sidebar { background: transparent; border-right-color: var(--separator); }
+.platform-mac .sidebar { background: var(--sidebar-tint); border-right-color: var(--separator); }
 .sidebar-drag { position: absolute; top: 0; left: 0; right: 0; height: 52px; }
+.side-brand { display: flex; align-items: center; gap: 8px; padding: 0 10px 12px; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.ui-logo { display: block; flex: none; }
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .nav {
   display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; border-radius: var(--radius-control);
@@ -136,7 +138,7 @@
 .onb-body .hotkey { align-items: center; text-align: center; }
 .onb-body .hotkey-choices { justify-content: center; }
 .onb-lead { font-size: 15px; line-height: 1.4; }
-.onb-glyph { width: 64px; height: 64px; border-radius: 15px; background: var(--accent); color: var(--accent-fg); display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
+.onb-glyph { display: flex; margin-bottom: 4px; }
 .onb-hero { padding: 18px 0 6px; }
 .onb-hero .ui-keycap { min-width: 56px; height: 52px; font-size: 20px; border-radius: 10px; animation: onb-press 2.4s var(--ease) infinite; }
 .onb-hero .ui-keycap:nth-child(2) { animation-delay: 0.12s; }
@@ -158,5 +160,5 @@
 .onb-listening-on .onb-pulse { background: var(--accent); }
 .onb-listening-on .onb-pulse::after { animation: onb-pulse 1.2s ease-out infinite; }
 @keyframes onb-pulse { 0% { transform: scale(1); opacity: 0.5; } 100% { transform: scale(2.6); opacity: 0; } }
-.onb-success { width: 56px; height: 56px; border-radius: 50%; background: var(--green); color: #fff; display: flex; align-items: center; justify-content: center; animation: toast-in 220ms var(--ease); }
+.onb-success { width: 56px; height: 56px; border-radius: 50%; background: var(--green); color: var(--surface); display: flex; align-items: center; justify-content: center; animation: toast-in 220ms var(--ease); }
 .onb-quote { background: var(--surface); border-radius: var(--radius-group); padding: 12px 16px; width: 100%; text-align: left; overflow-wrap: anywhere; }

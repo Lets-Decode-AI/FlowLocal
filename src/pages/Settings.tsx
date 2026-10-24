@@ -7,9 +7,12 @@ import Group from '../components/ui/Group';
 import IconButton from '../components/ui/IconButton';
 import { keycapsFor } from '../components/ui/Keycap';
 import Row from '../components/ui/Row';
+import Segmented from '../components/ui/Segmented';
 import Switch from '../components/ui/Switch';
 import { errMsg } from '../lib/format';
+import { useTheme, type ThemePref } from '../lib/theme';
 
+const THEMES: { value: ThemePref; label: string }[] = [{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }];
 const IDLE: [string, number | null][] = [['After 5 minutes', 5], ['After 10 minutes', 10], ['After 30 minutes', 30], ['Never', null]];
 
 export default function Settings() {
@@ -107,12 +110,18 @@ export default function Settings() {
 
       <Group title="General">
         <Row label="Open at login" accessory={<Switch label="Open at login" checked={s.launchAtLogin} onChange={(launchAtLogin) => save({ launchAtLogin })} />} />
+        <Appearance />
       </Group>
 
       <Dictionary />
       <HfToken />
     </div>
   );
+}
+
+function Appearance() {
+  const { pref, setPref } = useTheme();
+  return <Row label="Appearance" detail="System follows your computer's light or dark mode." accessory={<Segmented options={THEMES} value={pref} onChange={setPref} />} />;
 }
 
 function HfToken() {

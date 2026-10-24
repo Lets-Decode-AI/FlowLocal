@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "Lets the main window be dragged by its header regions",
+  "description": "Lets the main window be dragged by its header regions and follow the app theme",
   "windows": ["main"],
-  "permissions": ["core:window:allow-start-dragging"]
+  "permissions": ["core:window:allow-start-dragging", "core:window:allow-set-theme"]
 }

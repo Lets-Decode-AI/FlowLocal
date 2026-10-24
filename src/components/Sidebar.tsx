@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, type DictationState } from '../ipc';
 import { useEvent } from '../lib/hooks';
 import Icon, { type IconName } from './ui/Icon';
+import Logo from './ui/Logo';
 
 // Part 3 adds a "Home" dashboard entry above History; until then History is the landing page.
 const NAV: { label: string; route: string; icon: IconName }[] = [
@@ -27,6 +28,7 @@ export default function Sidebar({ route }: { route: string }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-drag" data-tauri-drag-region />
+      <div className="side-brand"><Logo size={22} />FlowLocal</div>
       <nav>
         {NAV.map((n) => (
           <a key={n.label} href={`#${n.route}`} className={`nav${route === n.route ? ' nav-on' : ''}`} aria-current={route === n.route ? 'page' : undefined}><Icon name={n.icon} />{n.label}</a>

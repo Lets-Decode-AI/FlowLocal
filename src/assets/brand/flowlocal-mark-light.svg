@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+    
+    <g fill="none" stroke="#F3F0E8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 318 743
+  C 244 731 216 689 230 634
+  C 249 561 329 531 416 483
+  C 506 434 590 389 626 315
+  C 657 250 630 196 580 185
+  C 521 172 466 228 437 318
+  C 400 431 410 569 450 658
+  C 473 710 505 755 544 754" stroke-width="48"/>
+      <path d="M 633 568 L 633 657" stroke-width="37"/>
+      <path d="M 691 526 L 691 698" stroke-width="37"/>
+      <path d="M 749 558 L 749 667" stroke-width="37"/>
+    </g>
+    <circle cx="807" cy="614" r="18" fill="#F3F0E8"/>
+    </svg>
