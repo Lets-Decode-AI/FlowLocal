@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, type DictationState, type Transcript } from '../../ipc';
+import { api, type DictationState, type Settings, type Transcript } from '../../ipc';
+import MicPicker from '../../components/MicPicker';
 import { useToast } from '../../components/Toasts';
 import Button from '../../components/ui/Button';
 import Icon from '../../components/ui/Icon';
@@ -25,7 +26,23 @@ export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
   const [state, setState] = useState<DictationState>({ kind: 'idle' });
   const [done, setDone] = useState(false);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
   const finished = useRef(false);
+
+  useEffect(() => {
+    api.settingsGet().then(setSettings, () => {});
+  }, []);
+  const chooseMic = async (mic: string | null) => {
+    if (!settings) return;
+    const next = { ...settings, mic };
+    setSettings(next);
+    try {
+      await api.settingsSet(next);
+    } catch (e) {
+      setSettings(settings);
+      toast(errMsg(e), 'error');
+    }
+  };
 
   useEffect(() => {
     let live = true;
@@ -77,6 +94,12 @@ export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
         <span className="onb-pulse" aria-hidden="true" />
         {describe(state)}
       </div>
+      {settings && (
+        <label className="onb-mic">
+          <span className="muted">Microphone</span>
+          <MicPicker value={settings.mic} onChange={chooseMic} />
+        </label>
+      )}
     </StepFrame>
   );
 }

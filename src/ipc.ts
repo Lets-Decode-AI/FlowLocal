@@ -151,6 +151,7 @@ export const api = {
   dictionaryDelete: (id: number) => invoke<void>('dictionary_delete', { id }),
 
   micList: () => invoke<string[]>('mic_list'),
+  openLogFolder: () => invoke<void>('open_log_folder'),
 };
 
 // ---- events (names mirror src-tauri/src/events.rs) -----------------------------------------

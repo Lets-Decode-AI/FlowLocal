@@ -58,6 +58,8 @@ pub struct ChunkPlanner {
     /// Samples already emitted in earlier chunks.
     emitted: u64,
     any_speech: bool,
+    /// Largest absolute sample seen so far.
+    peak: f32,
 }
 
 fn ms_of(samples: u64) -> u64 {
@@ -76,6 +78,7 @@ impl ChunkPlanner {
             carry: Vec::new(),
             emitted: 0,
             any_speech: false,
+            peak: 0.0,
         }
     }
 
@@ -84,12 +87,18 @@ impl ChunkPlanner {
         self.any_speech
     }
 
+    /// Largest absolute sample pushed so far (0.0 for a microphone that delivers only silence).
+    pub fn peak(&self) -> f32 {
+        self.peak
+    }
+
     fn frames_for(secs: f32) -> usize {
         (secs * 1000.0 / FRAME_MS as f32).round() as usize
     }
 
     pub fn push(&mut self, samples: &[f32]) -> Vec<Chunk> {
         let mut out = Vec::new();
+        self.peak = samples.iter().fold(self.peak, |m, s| m.max(s.abs()));
         self.carry.extend_from_slice(samples);
         let whole = self.carry.len() / FRAME_LEN * FRAME_LEN;
         let rest = self.carry.split_off(whole);
@@ -234,6 +243,17 @@ mod tests {
 
     fn silence(secs: f32) -> Vec<f32> {
         vec![0.0; (secs * SR as f32) as usize / FRAME_LEN * FRAME_LEN]
+    }
+
+    #[test]
+    fn peak_tracks_the_loudest_sample() {
+        let mut p = ChunkPlanner::new(ChunkerConfig::default());
+        p.push(&silence(0.5));
+        assert_eq!(p.peak(), 0.0);
+        p.push(&[0.1, -0.4, 0.2]);
+        assert_eq!(p.peak(), 0.4);
+        p.push(&silence(0.5));
+        assert_eq!(p.peak(), 0.4);
     }
 
     fn run(p: &mut ChunkPlanner, audio: &[f32]) -> Vec<Chunk> {

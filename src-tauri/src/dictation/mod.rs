@@ -144,6 +144,10 @@ pub const COPIED_ONLY_MESSAGE: &str = "Copied. Press \u{2318}V to paste.";
 #[cfg(not(target_os = "macos"))]
 pub const COPIED_ONLY_MESSAGE: &str = "Copied. Press Ctrl+V to paste.";
 
+/// A recording whose loudest sample stays below this (about -60 dBFS) is treated as a microphone
+/// that delivers no sound at all, rather than one that heard no speech.
+const SILENT_PEAK: f32 = 0.001;
+
 /// Minimum spacing of level events (~30 Hz).
 const LEVEL_EVERY: Duration = Duration::from_millis(33);
 const TICK_EVERY: Duration = Duration::from_millis(250);
@@ -151,10 +155,12 @@ const TICK_EVERY: Duration = Duration::from_millis(250);
 enum Msg {
     Hotkey(HotkeyEvent),
     Paused(bool),
-    /// An utterance's transcription finished (`Ok(None)`: no speech).
+    /// An utterance's transcription finished (`Ok(None)`: no speech; `silent`: the microphone
+    /// delivered no sound at all).
     Finalized {
         seq: u64,
         res: Result<Option<String>, SttError>,
+        silent: bool,
     },
     /// `Err`: the insert task panicked.
     InsertDone(Result<Option<(String, InsertOutcome)>, String>),
@@ -253,7 +259,9 @@ struct Slot {
 
 enum SlotRes {
     Text(String),
-    NoSpeech,
+    NoSpeech {
+        silent: bool,
+    },
     Stt(SttError),
     /// Failed outside the speech engine (e.g. the recorder could not stop).
     Failed(String),
@@ -457,10 +465,10 @@ impl Controller {
                     self.run(Input::Hotkey(HotkeyEvent::Cancel));
                 }
             }
-            Msg::Finalized { seq, res } => {
+            Msg::Finalized { seq, res, silent } => {
                 let res = match res {
                     Ok(Some(text)) => SlotRes::Text(text),
-                    Ok(None) => SlotRes::NoSpeech,
+                    Ok(None) => SlotRes::NoSpeech { silent },
                     Err(e) => SlotRes::Stt(e),
                 };
                 self.resolve(seq, res);
@@ -528,7 +536,7 @@ impl Controller {
             self.cur_meta = Some(slot.meta);
             let input = match slot.res.expect("ready") {
                 SlotRes::Text(raw) => Input::Transcribed(Ok(raw)),
-                SlotRes::NoSpeech => Input::NoSpeech,
+                SlotRes::NoSpeech { silent } => Input::NoSpeech { silent },
                 SlotRes::Stt(e) => Input::Transcribed(Err(e)),
                 SlotRes::Failed(msg) => Input::Failed(msg),
             };
@@ -575,6 +583,7 @@ impl Controller {
             Effect::Insert(raw) => self.insert(raw),
             Effect::Persist => self.persist(),
             Effect::ShowError(msg) => self.toast("error", &msg),
+            Effect::ShowWarning(msg) => self.toast("warning", &msg),
             Effect::ArmEsc(armed) => (self.d.arm_esc)(armed),
             Effect::Emit(_) => self.emit_state(),
         }
@@ -674,16 +683,23 @@ impl Controller {
                     .ok_or_else(|| SttError::EngineFailed("audio pump failed".into()))?;
                 if planner.any_speech() {
                     let tail = planner.finish();
-                    session.finish(tail).await.map(Some)
+                    session.finish(tail).await.map(Some).map(|t| (t, false))
                 } else {
                     session.cancel();
-                    Ok(None)
+                    let peak = planner.peak();
+                    tracing::info!(peak, "no speech in the recording");
+                    Ok((None, peak < SILENT_PEAK))
                 }
             });
-            let res = work.await.unwrap_or_else(|_| {
-                Err(SttError::EngineFailed("transcription task crashed".into()))
-            });
-            let _ = tx.send(Msg::Finalized { seq, res });
+            let (res, silent) = match work.await {
+                Ok(Ok((text, silent))) => (Ok(text), silent),
+                Ok(Err(e)) => (Err(e), false),
+                Err(_) => (
+                    Err(SttError::EngineFailed("transcription task crashed".into())),
+                    false,
+                ),
+            };
+            let _ = tx.send(Msg::Finalized { seq, res, silent });
         });
     }
 

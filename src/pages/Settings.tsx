@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, type DictEntry, type Settings as S } from '../ipc';
 import HotkeyInput from '../components/HotkeyInput';
+import MicPicker from '../components/MicPicker';
 import { useToast } from '../components/Toasts';
 import Button from '../components/ui/Button';
 import Group from '../components/ui/Group';
@@ -10,6 +11,7 @@ import Row from '../components/ui/Row';
 import Segmented from '../components/ui/Segmented';
 import Switch from '../components/ui/Switch';
 import { errMsg } from '../lib/format';
+import { isWindows } from '../lib/platform';
 import { useTheme, type ThemePref } from '../lib/theme';
 
 const THEMES: { value: ThemePref; label: string }[] = [{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }];
@@ -18,7 +20,6 @@ const IDLE: [string, number | null][] = [['After 5 minutes', 5], ['After 10 minu
 export default function Settings() {
   const toast = useToast();
   const [s, setS] = useState<S | null>(null);
-  const [mics, setMics] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
 
@@ -28,7 +29,6 @@ export default function Settings() {
 
   useEffect(() => {
     api.settingsGet().then((v) => { confirmed.current = v; setS(v); }, (e) => setError(errMsg(e)));
-    api.micList().then(setMics, () => {});
   }, []);
 
   // Saves run one at a time, each applied on top of the last accepted state, so a rejected
@@ -79,13 +79,8 @@ export default function Settings() {
         )}
         <Row
           label="Microphone"
-          accessory={
-            <select className="ui-select" aria-label="Microphone" value={s.mic ?? ''} onChange={(e) => save({ mic: e.target.value || null })}>
-              <option value="">System default</option>
-              {mics.map((m) => <option key={m} value={m}>{m}</option>)}
-              {s.mic && !mics.includes(s.mic) && <option value={s.mic}>{s.mic} (not connected)</option>}
-            </select>
-          }
+          detail="Your computer's built-in mic, or a headset or USB mic."
+          accessory={<MicPicker value={s.mic} onChange={(mic) => save({ mic })} />}
         />
         <Row
           label="Show Flow Bar" detail="The small pill at the bottom of the screen."
@@ -115,7 +110,27 @@ export default function Settings() {
 
       <Dictionary />
       <HfToken />
+      <Troubleshooting />
     </div>
+  );
+}
+
+function Troubleshooting() {
+  const toast = useToast();
+  const run = (f: () => Promise<void>) => f().catch((e) => toast(errMsg(e), 'error'));
+  return (
+    <Group title="Troubleshooting">
+      {isWindows() && (
+        <Row
+          label="Microphone privacy" detail="Windows must allow desktop apps to use the microphone."
+          accessory={<Button onClick={() => run(() => api.openPermissionSettings('microphone'))}>Open</Button>}
+        />
+      )}
+      <Row
+        label="Log file" detail="Attach it when you report a problem."
+        accessory={<Button onClick={() => run(api.openLogFolder)}>Show</Button>}
+      />
+    </Group>
   );
 }
 

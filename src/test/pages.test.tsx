@@ -19,7 +19,7 @@ vi.mock('../ipc', () => ({
     modelSetActive: vi.fn(async () => {}), historyList: vi.fn(), historyDelete: vi.fn(async () => {}),
     settingsGet: vi.fn(), settingsSet: vi.fn(async () => {}), hfTokenSet: vi.fn(async () => {}),
     dictionaryList: vi.fn(async () => []), dictionaryAdd: vi.fn(async () => 1), dictionaryDelete: vi.fn(async () => {}),
-    micList: vi.fn(async () => ['Built-in Mic']),
+    micList: vi.fn(async () => ['Built-in Mic']), openLogFolder: vi.fn(async () => {}),
   },
   on: vi.fn(async (name: string, cb: (p: any) => void) => {
     (handlers[name] ||= []).push(cb);
@@ -210,13 +210,45 @@ describe('Settings', () => {
   it('settings_groups_follow_system_settings_layout', async () => {
     render(<Settings />);
     await flush();
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Dictation', 'Model', 'General', 'Personal dictionary', 'Hugging Face']);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Dictation', 'Model', 'General', 'Personal dictionary', 'Hugging Face', 'Troubleshooting']);
     expect(screen.getByRole('switch', { name: 'Show Flow Bar' })).toBeTruthy();
     expect(screen.getByRole('switch', { name: 'Load at startup' })).toBeTruthy();
     expect(screen.getByRole('switch', { name: 'Open at login' })).toBeTruthy();
     fireEvent.click(screen.getByRole('switch', { name: 'Open at login' }));
     await flush();
     expect(a.settingsSet).toHaveBeenCalledWith({ ...settings, launchAtLogin: true });
+  });
+
+  it('settings_mic_list_refreshes_and_choice_persists', async () => {
+    render(<Settings />);
+    await flush();
+    const picker = screen.getByRole('combobox', { name: 'Microphone' }) as HTMLSelectElement;
+    a.micList.mockResolvedValueOnce(['Built-in Mic', 'USB Headset']);
+    fireEvent.focus(picker);
+    await flush();
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['System default', 'Built-in Mic', 'USB Headset']);
+    fireEvent.change(picker, { target: { value: 'USB Headset' } });
+    await flush();
+    expect(a.settingsSet).toHaveBeenCalledWith({ ...settings, mic: 'USB Headset' });
+  });
+
+  it('settings_troubleshooting_opens_logs_and_windows_mic_privacy', async () => {
+    Object.defineProperty(window.navigator, 'platform', { value: 'MacIntel', configurable: true });
+    render(<Settings />);
+    await flush();
+    expect(screen.queryByText('Microphone privacy')).toBeNull();
+    fireEvent.click(within(screen.getByText('Log file').closest('.ui-row') as HTMLElement).getByRole('button', { name: 'Show' }));
+    await flush();
+    expect(a.openLogFolder).toHaveBeenCalled();
+    cleanup();
+
+    Object.defineProperty(window.navigator, 'platform', { value: 'Win32', configurable: true });
+    render(<Settings />);
+    await flush();
+    fireEvent.click(within(screen.getByText('Microphone privacy').closest('.ui-row') as HTMLElement).getByRole('button', { name: 'Open' }));
+    await flush();
+    expect(a.openPermissionSettings).toHaveBeenCalledWith('microphone');
+    delete (window.navigator as any).platform;
   });
 
   it('settings_hotkey_change_persists', async () => {

@@ -298,6 +298,15 @@ impl Harness {
             .map(|(_, v)| v.clone())
             .collect()
     }
+    fn toasts(&self) -> Vec<Value> {
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(n, _)| n == crate::events::TOAST)
+            .map(|(_, v)| v.clone())
+            .collect()
+    }
     fn kinds(&self) -> Vec<String> {
         self.states()
             .iter()
@@ -398,7 +407,7 @@ async fn short_tap_is_discarded() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn no_speech_is_discarded() {
+async fn no_speech_is_discarded_and_reported() {
     let h = harness(silence(1.0), true);
     h.send(HotkeyEvent::Pressed);
     wait_for("started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
@@ -414,6 +423,31 @@ async fn no_speech_is_discarded() {
     .await;
     assert_eq!(h.stt.log(0).finishes.load(Ordering::SeqCst), 0);
     assert!(h.inserted().is_empty() && h.saved().is_empty());
+    // A microphone that delivers pure silence is reported, not silently dropped.
+    let toasts = h.toasts();
+    assert_eq!(toasts.len(), 1);
+    assert_eq!(toasts[0]["level"], json!("warning"));
+    assert_eq!(toasts[0]["message"], json!(super::machine::MIC_SILENT));
+}
+
+#[tokio::test(start_paused = true)]
+async fn quiet_room_without_speech_says_it_did_not_catch_that() {
+    // Faint noise: the microphone works, but nobody spoke.
+    let noise: Vec<f32> = (0..silence(1.0).len())
+        .map(|i| if i % 2 == 0 { 0.003 } else { -0.003 })
+        .collect();
+    let h = harness(noise, true);
+    h.send(HotkeyEvent::Pressed);
+    wait_for("started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    wait_for("back to idle", || {
+        h.kinds().ends_with(&["transcribing".into(), "idle".into()])
+    })
+    .await;
+    let toasts = h.toasts();
+    assert_eq!(toasts.len(), 1);
+    assert_eq!(toasts[0]["message"], json!(super::machine::NO_SPEECH));
 }
 
 #[tokio::test(start_paused = true)]
