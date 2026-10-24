@@ -28,6 +28,7 @@ const FLOWBAR_BOTTOM_MARGIN: f64 = 16.0;
 
 /// Show the main window, creating it lazily if it does not exist.
 fn open_main_window(app: &AppHandle, route: Option<&str>) -> tauri::Result<()> {
+    set_dock_presence(app, true);
     if let Some(w) = app.get_webview_window("main") {
         w.show()?;
         w.set_focus()?;
@@ -65,13 +66,35 @@ fn open_main_window(app: &AppHandle, route: Option<&str>) -> tauri::Result<()> {
     let w = b.build()?;
     // Closing the window destroys it; the app keeps running in the tray.
     let win = w.clone();
-    w.on_window_event(move |e| {
-        if let WindowEvent::CloseRequested { .. } = e {
+    let handle = app.clone();
+    w.on_window_event(move |e| match e {
+        WindowEvent::CloseRequested { .. } => {
             let _ = win.destroy();
         }
+        WindowEvent::Destroyed => set_dock_presence(&handle, false),
+        _ => {}
     });
     w.set_focus()?;
     Ok(())
+}
+
+/// FlowLocal lives in the menu bar. While the main window is open it also gets a Dock icon and a
+/// Command-Tab entry, so the window can be found again after another app (such as System
+/// Settings) comes to the front.
+fn set_dock_presence(app: &AppHandle, visible: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let policy = if visible {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        };
+        if let Err(e) = app.set_activation_policy(policy) {
+            tracing::warn!("could not change the Dock presence: {e}");
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, visible);
 }
 
 /// Place the Flow Bar at the bottom-center of the monitor under the cursor (falling back to the
@@ -242,7 +265,14 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             recorder: recorder.clone(),
             stt: Arc::new(stt.clone()),
             models: Arc::new(models.clone()),
-            inserter: Arc::new(insert::ClipboardInserter::system()),
+            inserter: Arc::new(insert::ClipboardInserter::system(Arc::new({
+                let h = handle.clone();
+                move |job| {
+                    if let Err(e) = h.run_on_main_thread(job) {
+                        tracing::warn!("could not schedule the paste on the main thread: {e}");
+                    }
+                }
+            }))),
             store: store.clone(),
             emit,
             arm_esc: Arc::new(move |armed| {
@@ -319,6 +349,7 @@ pub fn run() {
             commands::get_state,
             commands::set_paused,
             commands::permissions_status,
+            commands::restart_app,
             commands::open_permission_settings,
             commands::request_microphone,
             commands::catalog,

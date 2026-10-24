@@ -14,7 +14,7 @@ const transcript = { id: 7, createdAt: 1, text: 'Hello from FlowLocal', rawText:
 vi.mock('../ipc', () => ({
   api: {
     getState: vi.fn(async () => ({ kind: 'idle' })),
-    permissionsStatus: vi.fn(), openPermissionSettings: vi.fn(async () => {}), requestMicrophone: vi.fn(async () => {}),
+    permissionsStatus: vi.fn(), openPermissionSettings: vi.fn(async () => {}), requestMicrophone: vi.fn(async () => {}), restartApp: vi.fn(async () => {}),
     catalog: vi.fn(), installed: vi.fn(), recommend: vi.fn(),
     modelInstall: vi.fn(async () => {}), modelPause: vi.fn(async () => {}), modelResume: vi.fn(async () => {}),
     modelCancel: vi.fn(async () => {}), modelSetActive: vi.fn(async () => {}),
@@ -39,6 +39,7 @@ const toStep = async (n: number) => { for (let i = 1; i < n; i++) await next(); 
 const stepLabel = () => screen.getByRole('group', { name: /^Step \d of 5/ }).getAttribute('aria-label');
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.useFakeTimers();
   for (const k of Object.keys(handlers)) delete handlers[k];
   vi.clearAllMocks();
@@ -193,6 +194,26 @@ describe('Permissions step', () => {
     const calls = a.permissionsStatus.mock.calls.length;
     await tick(5000);
     expect(a.permissionsStatus.mock.calls.length).toBe(calls);
+  });
+  it('restart_offered_after_allowing_accessibility', async () => {
+    a.permissionsStatus.mockResolvedValue({ microphone: 'granted', accessibility: 'denied' });
+    render(<Onboarding />);
+    await flush();
+    await toStep(3);
+    expect(screen.queryByRole('button', { name: /restart flowlocal/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /allow accessibility/i }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: /restart flowlocal/i }));
+    expect(a.restartApp).toHaveBeenCalled();
+  });
+
+  it('resumes_at_the_saved_step_after_restart', async () => {
+    window.localStorage.setItem('flowlocal.onboardingStep', '2');
+    a.permissionsStatus.mockResolvedValue({ microphone: 'granted', accessibility: 'denied' });
+    render(<Onboarding />);
+    await flush();
+    expect(screen.getByRole('heading', { name: /permissions/i })).toBeTruthy();
+    window.localStorage.removeItem('flowlocal.onboardingStep');
   });
 });
 
